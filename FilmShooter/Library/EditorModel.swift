@@ -73,7 +73,7 @@ final class EditorModel: Identifiable {
             var cropAspect: Double?
             if case .existing(let p) = source { cropAspect = p.cropAspect }
             let crop = cropAspect
-            let frame: EngineFrame = try await engine.run {
+            let frame: EngineFrame = try await engine.run { () throws -> EngineFrame in
                 let ci = try PhotoDecoder.ciImage(from: data, isRAW: isRAW)
                 // The editor works on a frame no bigger than the export.
                 let prepared = PhotoDecoder.prepare(ci, aspect: crop, maxLongEdge: quality)

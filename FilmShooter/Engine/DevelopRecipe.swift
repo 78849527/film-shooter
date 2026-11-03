@@ -183,7 +183,7 @@ struct DevelopRecipe: Codable, Hashable {
     static func dateText(_ date: Date) -> String {
         let c = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: date)
         let yy = (c.year ?? 2026) % 100
-        return String(format: "'%02d %d %d", yy, c.month ?? 1, c.day ?? 1)
+        return String(format: "'%02ld %ld %ld", yy, c.month ?? 1, c.day ?? 1)
     }
 }
 

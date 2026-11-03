@@ -199,7 +199,7 @@ final class Darkroom {
 
         // Decode into the engine's frame on the engine queue: Core Image's GPU
         // work and the engine's planes never overlap in memory.
-        let frame: EngineFrame = try await engine.run {
+        let frame: EngineFrame = try await engine.run { () throws -> EngineFrame in
             let ci = try PhotoDecoder.ciImage(from: data, isRAW: isRAW)
             let prepared = PhotoDecoder.prepare(ci, aspect: aspect, maxLongEdge: quality)
             return try engine.makeFrame(from: prepared)

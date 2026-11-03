@@ -112,7 +112,7 @@ final class FilmEngine: @unchecked Sendable {
     /// Create the engine (loads the baked tables and compiles nothing: the
     /// kernels ship precompiled). Idempotent.
     func start() async throws {
-        try await run { [self] in
+        try await run { [self] () throws -> Void in
             if engine != nil { return }
             guard let dir = Self.resourcesURL else { throw EngineError.resourcesMissing }
             let created = dir.path.withCString { path in
@@ -216,7 +216,7 @@ final class FilmEngine: @unchecked Sendable {
 
     /// Open, develop at full resolution, close. Returns the print in Display P3.
     func develop(frame: EngineFrame, params: [String: Any]) async throws -> EngineImage {
-        try await run { [self] in
+        try await run { [self] () throws -> EngineImage in
             let engine = try requireEngine()
             let session = try open(engine: engine, frame: frame, params: params)
             defer { spk_session_release(session) }
@@ -259,7 +259,7 @@ final class FilmEngine: @unchecked Sendable {
     /// The grid is handed in as sRGB-encoded values and comes back sRGB-encoded.
     func bakeLUT(recipe: DevelopRecipe, size: Int = 33) async throws -> FilmLUT {
         let key = Self.lutKey(recipe, size: size)
-        return try await run { [self] in
+        return try await run { [self] () throws -> FilmLUT in
             let engine = try requireEngine()
             // Each cell is a k x k block and only its centre pixel is read back:
             // the scanner's unsharp mask (0.7 px, not on the wire) would
@@ -341,7 +341,7 @@ final class FilmEngine: @unchecked Sendable {
                          captureDate: Date?) async throws -> EditSession {
         var params = recipe.engineParams(aspect: frame.aspect, purpose: .develop, captureDate: captureDate)
         params["preview_long_edge"] = max(800, min(8192, previewLongEdge))
-        let session = try await run { [self] in
+        let session: OpaquePointer = try await run { [self] () throws -> OpaquePointer in
             let engine = try requireEngine()
             return try open(engine: engine, frame: frame, params: params)
         }
@@ -365,7 +365,11 @@ final class FilmEngine: @unchecked Sendable {
 /// cached, so print-side changes reprint in milliseconds.
 final class EditSession: @unchecked Sendable {
     private let engine: FilmEngine
-    private var session: OpaquePointer?
+    /// The engine session. Only touched on the engine queue, except for
+    /// `spk_cancel`, which the engine documents as safe from any thread.
+    private let handle: OpaquePointer
+    /// Engine-queue state.
+    private var closed = false
     private var params: [String: Any]
     let aspect: Double
     let captureDate: Date?
@@ -380,27 +384,33 @@ final class EditSession: @unchecked Sendable {
     fileprivate init(engine: FilmEngine, session: OpaquePointer, params: [String: Any], aspect: Double,
                      captureDate: Date?) {
         self.engine = engine
-        self.session = session
+        self.handle = session
         self.params = params
         self.aspect = aspect
         self.captureDate = captureDate
     }
 
     deinit {
-        if let s = session {
-            engine.queue.async { spk_session_release(s) }
+        // No other reference exists here, so reading `closed` is safe.
+        if !closed {
+            let h = handle
+            engine.queue.async { spk_session_release(h) }
         }
     }
 
+    /// Release the engine session (after any render already queued).
     func close() {
-        guard let s = session else { return }
-        session = nil
-        engine.queue.async { spk_session_release(s) }
+        engine.queue.async { [self] in
+            guard !closed else { return }
+            closed = true
+            spk_session_release(handle)
+        }
     }
 
-    /// Ask the render in flight to stop at its next node boundary.
+    /// Ask the render in flight to stop at its next node boundary. Only call
+    /// this before `close()`.
     func cancelInFlight() {
-        if let s = session { engine.cancel(session: s) }
+        spk_cancel(handle, nil)
     }
 
     /// Apply `recipe` and render the screen-sized tier.
@@ -414,13 +424,14 @@ final class EditSession: @unchecked Sendable {
     }
 
     private func apply(recipe: DevelopRecipe, tier: String) async throws -> EngineImage {
-        var next = recipe.engineParams(aspect: aspect, purpose: .develop, captureDate: captureDate)
-        next["preview_long_edge"] = params["preview_long_edge"]
-        next.removeValue(forKey: "product_defaults")
-        return try await engine.run { [self] in
-            guard let session else { throw EngineError.notReady }
+        var wanted = recipe.engineParams(aspect: aspect, purpose: .develop, captureDate: captureDate)
+        wanted.removeValue(forKey: "product_defaults")
+        let next = wanted
+        return try await engine.run { [self] () throws -> EngineImage in
+            guard !closed else { throw EngineError.notReady }
+            let session = handle
             var delta: [String: Any] = [:]
-            for (k, v) in next where !Self.same(params[k], v) { delta[k] = v }
+            for (k, v) in next where k != "preview_long_edge" && !Self.same(params[k], v) { delta[k] = v }
             var shootChanged = false
             if !delta.isEmpty {
                 shootChanged = delta.keys.contains { !Self.printKeys.contains($0) }
