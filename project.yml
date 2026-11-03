@@ -57,7 +57,7 @@ targets:
           - $(SRCROOT)/Engine/src
           - $(SRCROOT)/Engine/src/core
           - $(SRCROOT)/Engine/third_party/metal-cpp
-        OTHER_CPLUSPLUSFLAGS: "$(inherited) -Wno-shorten-64-to-32 -Wno-comma -Wno-conversion"
+        OTHER_CPLUSPLUSFLAGS: "$(inherited) -Wno-shorten-64-to-32 -Wno-comma -Wno-conversion -Wno-return-type-c-linkage"
         USE_HEADERMAP: NO
         MTL_FAST_MATH: YES
         MTL_LANGUAGE_REVISION: Metal30
