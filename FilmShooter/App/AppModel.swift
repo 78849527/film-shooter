@@ -86,6 +86,8 @@ final class AppModel {
         filmID = initial.filmID
         frameNumber = max(1, UserDefaults.standard.integer(forKey: "frameNumber"))
         lut = luts.cached(for: recipe)
+        let darkroom = self.darkroom
+        luts.shouldPause = { darkroom.isBusy }
     }
 
     // MARK: lifecycle

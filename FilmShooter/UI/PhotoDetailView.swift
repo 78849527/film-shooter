@@ -137,7 +137,7 @@ struct PhotoDetailView: View {
                     Text("No. \(String(format: "%02ld", photo.frameNumber))")
                         .lcdText(13)
                 }
-                Text("\(paperName) · \(photo.recipe.format.title) · \(photo.captureDate.formatted(date: .abbreviated, time: .shortened))")
+                Text("\(paperName) · \(photo.recipe.format.title) · \(photo.captureDate.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Locale(identifier: "zh_CN"))))")
                     .font(AppFont.ui(12))
                     .foregroundStyle(Theme.secondary)
                     .lineLimit(1)

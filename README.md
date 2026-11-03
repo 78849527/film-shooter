@@ -27,6 +27,23 @@ DIR couplers and all — instead of a LUT or a filter.
 - **Film edge & date back** — print the frame on its own strip with rebate and
   edge print, or expose the date into the corner.
 
+## 安装（未签名 IPA）
+
+1. 打开 [Releases → latest](https://github.com/xuys2025/film-shooter/releases/tag/latest)，下载 `FilmShooter-unsigned.ipa`
+   （每次推送到 `main` 都会由 GitHub Actions 自动重新构建）。
+2. 用你自己的签名工具安装：
+   - **AltStore / SideStore**：在 My Apps 里点 “+” 选择 IPA（免费 Apple ID 签名 7 天有效）；
+   - **Sideloadly**：电脑连接手机，拖入 IPA，登录 Apple ID 后 Start；
+   - **TrollStore**（支持的系统版本）：直接用 TrollStore 打开 IPA 安装，永久有效；
+   - 有开发者证书也可以用 `zsign`/`ios-app-signer` 重签。
+3. 需要 iOS 18 及以上，iPhone XS / XR 及更新机型。首次打开会请求相机权限；冲洗好的照片会自动存入相册（可在设置里关闭）。
+
+### 使用小贴士
+- 取景器里**左右滑动**切换胶卷，或在下方胶卷罐轮播里滑动选择；点中间的胶卷罐打开**胶片库**（带实时预览，可收藏常用胶卷）。
+- 点 **冲印** 调整相纸、亮度、色温/色调、颗粒、光晕、底片尺寸（135/120），以及**胶片边框**和**日期印**。
+- 焦段按钮可点按切换，也可**在按钮上左右拖动**像原生相机一样连续变焦；音量键 / 相机控制按钮可以按快门。
+- 底片册里可以**导入照片冲洗**，或对已拍照片**重新冲洗**换一款胶卷。
+
 ## Build
 
 There is no need for a local Mac: GitHub Actions builds an **unsigned IPA**

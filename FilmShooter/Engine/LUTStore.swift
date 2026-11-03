@@ -11,6 +11,8 @@ final class LUTStore {
     private var inFlight: [String: Task<FilmLUT, Error>] = [:]
     private var prebakeTask: Task<Void, Never>?
     let size = 33
+    /// Background bakes wait while this returns true (e.g. a frame is developing).
+    var shouldPause: () -> Bool = { false }
 
     init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -56,6 +58,11 @@ final class LUTStore {
             let ordered = films.indices.sorted { abs($0 - start) < abs($1 - start) }.map { films[$0] }
             for film in ordered {
                 if Task.isCancelled { return }
+                // Never hold up a development: the engine runs one job at a time.
+                while self?.shouldPause() == true {
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    if Task.isCancelled { return }
+                }
                 var r = recipe
                 r.selectFilm(film.id)
                 guard let self else { return }
