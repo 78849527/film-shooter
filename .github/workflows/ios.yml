@@ -101,4 +101,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create latest build/FilmShooter-unsigned.ipa             --title "FilmShooter 胶片机 (unsigned, build ${{ github.run_number }})"             --notes "Unsigned IPA built from ${GITHUB_SHA}. 未签名 IPA，请用 AltStore / Sideloadly / TrollStore 等工具自行签名安装。"             --prerelease --target "$GITHUB_SHA"
+          gh release create latest build/FilmShooter-unsigned.ipa             --title "FilmShooter 胶片机 (unsigned, build ${{ github.run_number }})"             --notes "Unsigned IPA built from ${GITHUB_SHA}. 未签名 IPA，请用 AltStore / Sideloadly / TrollStore 等工具自行签名安装。"             --latest --target "$GITHUB_SHA"

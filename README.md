@@ -1,5 +1,12 @@
 # 胶片机 · FilmShooter
 
+## ⬇️ [点这里下载 IPA（最新版）](https://github.com/xuys2025/film-shooter/releases/latest/download/FilmShooter-unsigned.ipa)
+
+> 直链：`https://github.com/xuys2025/film-shooter/releases/latest/download/FilmShooter-unsigned.ipa`
+>
+> iPhone 上用 Safari 点上面的链接 →「下载」→ 文件存到「文件 → 下载项」→ 长按 IPA →「共享」→ 选 AltStore / SideStore / TrollStore 安装。
+> 未签名，需自行签名安装；要求 iOS 18+。每次更新代码都会自动重新编译，这个链接永远指向最新版。
+
 An iOS film camera built on a **spectral film simulation engine**. Pick a film
 stock, shoot, and every frame is developed and printed through a physical
 model of the film's dye layers, the enlarger and the paper — grain, halation,
