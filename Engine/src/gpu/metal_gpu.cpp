@@ -19,6 +19,7 @@
 // are the C function-pointer API, which is what keeps this a `.cpp` rather
 // than a `.mm` (see the file header).
 #include <dispatch/dispatch.h>
+#include <TargetConditionals.h>
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -675,6 +676,15 @@ public:
 
     void* texture(Buffer* b, uint32_t width, uint32_t height,
                   uint32_t row_stride_px, std::string& error) override {
+#if TARGET_OS_SIMULATOR
+        // FilmShooter (iOS): the Simulator cannot make a texture over a shared
+        // buffer (MTLSimBuffer asserts). The iOS app only reads `rgba16`, so in
+        // the Simulator the "texture" handle is the buffer itself, +1; it is
+        // released through the same `release()` as a texture would be.
+        (void)width; (void)height; (void)row_stride_px; (void)error;
+        b->mtl->retain();
+        return b->mtl;
+#endif
         MTL::TextureDescriptor* desc = MTL::TextureDescriptor::alloc()->init();
         desc->setTextureType(MTL::TextureType2D);
         desc->setPixelFormat(MTL::PixelFormatRGBA16Unorm);

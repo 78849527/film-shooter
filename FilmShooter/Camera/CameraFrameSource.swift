@@ -57,6 +57,18 @@ final class CameraFrameSource: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         nextFrameCallback = block
     }
 
+    /// Deliver a frame as if the camera had (screenshot mode, no camera).
+    func inject(_ pixelBuffer: CVPixelBuffer) {
+        lock.lock()
+        latest = pixelBuffer
+        let subscriber = handler
+        let once = nextFrameCallback
+        nextFrameCallback = nil
+        lock.unlock()
+        subscriber?(pixelBuffer)
+        once?()
+    }
+
     // MARK: AVCaptureVideoDataOutputSampleBufferDelegate
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
