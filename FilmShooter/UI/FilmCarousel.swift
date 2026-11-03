@@ -31,8 +31,12 @@ struct FilmCarousel: View {
                     ForEach(FilmCatalog.films) { film in
                         card(film, width: cardWidth)
                             .visualEffect { content, proxy in
-                                let mid = proxy.frame(in: .scrollView(axis: .horizontal)).midX
-                                let d = (mid - viewport / 2) / step
+                                // Distance from the visible centre, measured in the
+                                // card's own space against the scroll view's visible
+                                // bounds: independent of content margins.
+                                let visible = proxy.bounds(of: .scrollView(axis: .horizontal))
+                                    ?? CGRect(x: 0, y: 0, width: viewport, height: 0)
+                                let d = (proxy.size.width / 2 - visible.midX) / step
                                 let t = abs(d)
                                 let k = min(t, 1)
                                 let scale = 1 - shrink * k

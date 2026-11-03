@@ -147,6 +147,10 @@ struct CameraScreen: View {
             }
             editor = EditorModel(source: .imported(data: data, isRAW: false), recipe: model.recipe,
                                  outputLongEdge: model.settings.outputQuality.longEdge)
+        case "library":
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            libraryFilter = .all
+            showLibrary = true
         case "settings":
             showSettings = true
         case "about":

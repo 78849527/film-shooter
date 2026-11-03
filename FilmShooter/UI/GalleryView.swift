@@ -18,30 +18,32 @@ struct GalleryView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 0) {
-                    let jobs = model.darkroom.jobs
-                    if !jobs.isEmpty {
-                        DevelopingTray(jobs: jobs)
-                            .padding(.bottom, 14)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                    let photos = model.library.photos
-                    if photos.isEmpty {
-                        if jobs.isEmpty {
-                            EmptyRollView()
-                                .padding(.top, 70)
-                                .transition(.opacity)
+            VStack(spacing: 0) {
+                header
+                ScrollView {
+                    VStack(spacing: 0) {
+                        let jobs = model.darkroom.jobs
+                        if !jobs.isEmpty {
+                            DevelopingTray(jobs: jobs)
+                                .padding(.bottom, 14)
+                                .transition(.move(edge: .top).combined(with: .opacity))
                         }
-                    } else {
-                        grid(photos)
+                        let photos = model.library.photos
+                        if photos.isEmpty {
+                            if jobs.isEmpty {
+                                EmptyRollView()
+                                    .padding(.top, 70)
+                                    .transition(.opacity)
+                            }
+                        } else {
+                            grid(photos)
+                        }
                     }
+                    .animation(Motion.standard, value: model.darkroom.jobs.map(\.id))
+                    .animation(Motion.standard, value: model.library.photos.map(\.id))
                 }
-                .animation(Motion.standard, value: model.darkroom.jobs.map(\.id))
-                .animation(Motion.standard, value: model.library.photos.map(\.id))
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
-            .safeAreaInset(edge: .top, spacing: 0) { header }
             .background(Theme.background.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(item: $openedID) { id in
@@ -71,7 +73,8 @@ struct GalleryView: View {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 waited += 1
             }
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            // Let the cover's zoom transition finish before pushing.
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
             if let first = model.library.photos.first {
                 currentID = first.id
                 openedID = first.id

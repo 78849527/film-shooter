@@ -71,6 +71,7 @@ xcrun simctl spawn "$UDID" log show --last 6m --style compact   --predicate 'pro
 shot camera 9
 shot camera-film 9
 shot print 8
+shot library 12
 shot gallery 6
 shot detail 7
 shot editor 16

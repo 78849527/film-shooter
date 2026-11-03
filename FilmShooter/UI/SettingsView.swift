@@ -4,11 +4,12 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    @State private var showAbout: Bool
+    @State private var showAbout = false
     @State private var confirmRewind = false
+    private let startAtAbout: Bool
 
     init(startAtAbout: Bool = false) {
-        _showAbout = State(initialValue: startAtAbout)
+        self.startAtAbout = startAtAbout
     }
 
     var body: some View {
@@ -143,6 +144,12 @@ struct SettingsView: View {
             .navigationDestination(isPresented: $showAbout) {
                 AboutView()
             }
+        }
+        .task {
+            // Opened straight to About: push once the sheet has settled.
+            guard startAtAbout, !showAbout else { return }
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            showAbout = true
         }
         .tint(Theme.accent)
         .presentationDragIndicator(.visible)
