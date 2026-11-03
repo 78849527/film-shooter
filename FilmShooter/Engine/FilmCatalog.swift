@@ -19,6 +19,16 @@ enum FilmKind: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// Two-character label for compact chips.
+    var chipTitle: String {
+        switch self {
+        case .colorNegative: return "负片"
+        case .cinema:        return "电影"
+        case .slide:         return "反转"
+        case .blackWhite:    return "黑白"
+        }
+    }
+
     var shortTitle: String {
         switch self {
         case .colorNegative: return "C-41"

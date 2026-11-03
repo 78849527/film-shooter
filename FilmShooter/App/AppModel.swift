@@ -27,9 +27,20 @@ final class AppModel {
     var recipe: DevelopRecipe {
         didSet {
             guard recipe != oldValue else { return }
-            persistRecipe()
-            refreshLUT()
+            if recipe.filmID != filmID { filmID = recipe.filmID }
+            schedulePersist()
+            if !isAdjustingPrint { refreshLUT() }
         }
+    }
+
+    /// The loaded film's id, tracked on its own so views that only care about
+    /// the film don't re-render on every print-slider tick.
+    private(set) var filmID: String
+
+    /// True while a print slider is being dragged: the viewfinder table is
+    /// re-baked once on release instead of mid-drag.
+    var isAdjustingPrint = false {
+        didSet { if oldValue && !isAdjustingPrint { refreshLUT() } }
     }
 
     /// The viewfinder's current colour table (nil until the first bake).
@@ -43,8 +54,9 @@ final class AppModel {
 
     @ObservationIgnored private var bannerTask: Task<Void, Never>?
     @ObservationIgnored private var lutTask: Task<Void, Never>?
+    @ObservationIgnored private var persistTask: Task<Void, Never>?
 
-    var film: FilmStock { recipe.film }
+    var film: FilmStock { FilmCatalog.film(filmID) }
     var paper: PrintPaper? { film.kind.usesPrintPaper ? FilmCatalog.paper(recipe.resolvedPaperID) : nil }
 
     /// The grain strength the viewfinder should simulate (0...2).
@@ -71,6 +83,7 @@ final class AppModel {
         } else {
             recipe = DevelopRecipe()
         }
+        filmID = recipe.filmID
         frameNumber = max(1, UserDefaults.standard.integer(forKey: "frameNumber"))
         lut = luts.cached(for: recipe)
     }
@@ -102,6 +115,7 @@ final class AppModel {
         } else {
             camera.stop()
             luts.cancelPrebake()
+            persistRecipe()
         }
     }
 
@@ -112,6 +126,11 @@ final class AppModel {
         var r = recipe
         r.selectFilm(id)
         recipe = r
+    }
+
+    /// Remember a film as recently used (shot with, or picked in the library).
+    func noteRecentFilm(_ id: String) {
+        guard settings.recentFilmIDs.first != id else { return }
         var recent = settings.recentFilmIDs.filter { $0 != id }
         recent.insert(id, at: 0)
         settings.recentFilmIDs = Array(recent.prefix(6))
@@ -146,7 +165,7 @@ final class AppModel {
     /// Small live previews of the current viewfinder frame through each film's
     /// viewfinder table. Only films whose table is already baked are included;
     /// the others bake in the background (call again shortly).
-    func filmPreviews(width: Int = 150) async -> [String: UIImage] {
+    func filmPreviews(width: Int = 240) async -> [String: UIImage] {
         guard let frame = camera.frames.latestFrame() else { return [:] }
         var tables: [(String, FilmLUT)] = []
         for film in FilmCatalog.films {
@@ -167,8 +186,20 @@ final class AppModel {
     }
 
     private func persistRecipe() {
+        persistTask?.cancel()
+        persistTask = nil
         if let data = try? JSONEncoder().encode(recipe) {
             UserDefaults.standard.set(data, forKey: "recipe")
+        }
+    }
+
+    /// Slider drags change the recipe up to 120 times a second; save once it settles.
+    private func schedulePersist() {
+        persistTask?.cancel()
+        persistTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            self?.persistRecipe()
         }
     }
 
@@ -217,6 +248,7 @@ final class AppModel {
         do {
             let photo = try await camera.capturePhoto()
             advanceFrame()
+            noteRecentFilm(recipe.filmID)
             var r = recipe
             // A DNG is scene-linear and the phone exposes RAW low to keep the
             // highlights, so let the engine meter it; a processed HEIC is

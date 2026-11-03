@@ -89,10 +89,27 @@ final class PhotoLibrary {
     }
 
     /// Cached contact-sheet thumbnail (synchronous: it is a small JPEG).
+    /// Prefer `cachedThumbnail` + `loadThumbnail` in scrolling views.
     func thumbnail(for photo: DevelopedPhoto) -> UIImage? {
         if let t = thumbs.object(forKey: photo.id as NSUUID) { return t }
         guard let img = UIImage(contentsOfFile: url(photo.thumbName).path) else { return nil }
         thumbs.setObject(img, forKey: photo.id as NSUUID)
+        return img
+    }
+
+    /// The thumbnail only if it is already decoded (never touches the disk).
+    func cachedThumbnail(for photo: DevelopedPhoto) -> UIImage? {
+        thumbs.object(forKey: photo.id as NSUUID)
+    }
+
+    /// Decode the thumbnail off the main thread (ready for display) and cache it.
+    func loadThumbnail(for photo: DevelopedPhoto) async -> UIImage? {
+        if let t = thumbs.object(forKey: photo.id as NSUUID) { return t }
+        let path = url(photo.thumbName).path
+        let img = await Task.detached(priority: .userInitiated) {
+            UIImage(contentsOfFile: path)?.preparingForDisplay()
+        }.value
+        if let img { thumbs.setObject(img, forKey: photo.id as NSUUID) }
         return img
     }
 
