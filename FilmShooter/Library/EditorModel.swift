@@ -33,6 +33,7 @@ final class EditorModel: Identifiable {
     var canDevelop: Bool { error == nil && !isLoading }
 
     @ObservationIgnored private var session: EditSession?
+    @ObservationIgnored private var isClosed = false
     @ObservationIgnored private var renderTask: Task<Void, Never>?
     @ObservationIgnored private var pending = false
     @ObservationIgnored private let quality: Int
@@ -79,8 +80,11 @@ final class EditorModel: Identifiable {
                 let prepared = PhotoDecoder.prepare(ci, aspect: crop, maxLongEdge: quality)
                 return try engine.makeFrame(from: prepared)
             }
-            session = try await engine.openEditSession(frame: frame, recipe: recipe, previewLongEdge: 1600,
-                                                       captureDate: captureDate)
+            let opened = try await engine.openEditSession(frame: frame, recipe: recipe, previewLongEdge: 1600,
+                                                          captureDate: captureDate)
+            // Dismissed while loading: release the engine session right away.
+            if isClosed { opened.close(); return }
+            session = opened
             isLoading = false
             await renderNow()
         } catch {
@@ -127,6 +131,7 @@ final class EditorModel: Identifiable {
 
     /// Release the engine session (frees its GPU planes).
     func close() {
+        isClosed = true
         renderTask?.cancel()
         session?.close()
         session = nil
