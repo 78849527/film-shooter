@@ -112,6 +112,53 @@ final class AppModel {
         var r = recipe
         r.selectFilm(id)
         recipe = r
+        var recent = settings.recentFilmIDs.filter { $0 != id }
+        recent.insert(id, at: 0)
+        settings.recentFilmIDs = Array(recent.prefix(6))
+    }
+
+    /// Step through the films in carousel order (wraps around).
+    func selectAdjacentFilm(_ step: Int) {
+        let films = FilmCatalog.films
+        guard let i = films.firstIndex(where: { $0.id == recipe.filmID }) else { return }
+        let j = ((i + step) % films.count + films.count) % films.count
+        selectFilm(films[j].id)
+    }
+
+    func isFavorite(_ filmID: String) -> Bool { settings.favoriteFilmIDs.contains(filmID) }
+
+    func toggleFavorite(_ filmID: String) {
+        if isFavorite(filmID) {
+            settings.favoriteFilmIDs.removeAll { $0 == filmID }
+        } else {
+            settings.favoriteFilmIDs.append(filmID)
+        }
+    }
+
+    var favoriteFilms: [FilmStock] {
+        settings.favoriteFilmIDs.compactMap { id in FilmCatalog.films.first { $0.id == id } }
+    }
+
+    var recentFilms: [FilmStock] {
+        settings.recentFilmIDs.compactMap { id in FilmCatalog.films.first { $0.id == id } }
+    }
+
+    /// Small live previews of the current viewfinder frame through each film's
+    /// viewfinder table. Only films whose table is already baked are included;
+    /// the others bake in the background (call again shortly).
+    func filmPreviews(width: Int = 150) async -> [String: UIImage] {
+        guard let frame = camera.frames.latestFrame() else { return [:] }
+        var tables: [(String, FilmLUT)] = []
+        for film in FilmCatalog.films {
+            var r = recipe
+            r.selectFilm(film.id)
+            if let l = luts.cached(for: r) { tables.append((film.id, l)) }
+        }
+        if tables.count < FilmCatalog.films.count { luts.prebake(around: recipe) }
+        let list = tables
+        return await Task.detached(priority: .userInitiated) {
+            FilmPreviewRenderer.render(pixelBuffer: frame, tables: list, width: width)
+        }.value
     }
 
     func selectPaper(_ id: String) {

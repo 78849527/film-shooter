@@ -305,6 +305,9 @@ final class FilmEngine: @unchecked Sendable {
                 throw EngineError.call("spk_render", lastError())
             }
             defer { spk_result_free(&result) }
+            guard Int(result.width) == width, Int(result.height) == height, Int(result.row_stride_px) >= width else {
+                throw EngineError.call("spk_render", "LUT grid came back \(result.width)x\(result.height), expected \(width)x\(height)")
+            }
             let stride = Int(result.row_stride_px) * 4
             var out = [Float16](repeating: 1, count: n * n * n * 4)
             let scale = Float(1) / 65535

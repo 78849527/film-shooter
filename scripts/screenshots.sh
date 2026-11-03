@@ -55,11 +55,17 @@ xcrun simctl launch "$UDID" "$BUNDLE" -FSScreenshot seed > /dev/null
 for i in $(seq 1 90); do
   n=$(ls "$DATA/Documents/Roll/"*.json 2>/dev/null | wc -l | tr -d ' ')
   [[ "$n" -ge 4 ]] && break
+  if ! pgrep -f "FilmShooter.app/FilmShooter" > /dev/null; then echo "app is not running (crashed?) after ${i} polls"; break; fi
   sleep 2
 done
 echo "seeded prints: ${n:-0}"
 sleep 2
 xcrun simctl io "$UDID" screenshot "$OUT/seed.png" > /dev/null 2>&1
+
+# Crash reports and the app's unified log, if anything went wrong.
+mkdir -p "$OUT/diagnostics"
+cp ~/Library/Logs/DiagnosticReports/FilmShooter* "$OUT/diagnostics/" 2>/dev/null || true
+xcrun simctl spawn "$UDID" log show --last 6m --style compact   --predicate 'process == "FilmShooter"' > "$OUT/diagnostics/unified.log" 2>/dev/null || true
 
 # 2. Every screen.
 shot camera 9
@@ -80,6 +86,7 @@ for f in "$DATA/Documents/Roll/"*; do
   esac
 done
 cp "$DATA/Documents/Roll/"*.json "$OUT/prints/" 2>/dev/null || true
+cp ~/Library/Logs/DiagnosticReports/FilmShooter* "$OUT/diagnostics/" 2>/dev/null || true
 # The app's own log (engine errors etc.).
 cp "$DATA/Documents/screenshot-log.txt" "$OUT/" 2>/dev/null || true
 ls -la "$OUT" "$OUT/prints"

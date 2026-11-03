@@ -89,6 +89,10 @@ final class AppSettings {
     var viewfinderGrain: Bool { didSet { save(viewfinderGrain, "viewfinderGrain") } }
     var haptics: Bool { didSet { save(haptics, "haptics") } }
     var rollLength: Int { didSet { save(rollLength, "rollLength") } }
+    /// Favourite films, in the order the user starred them.
+    var favoriteFilmIDs: [String] { didSet { save(favoriteFilmIDs, "favoriteFilmIDs") } }
+    /// Most recently used films, most recent first.
+    var recentFilmIDs: [String] { didSet { save(recentFilmIDs, "recentFilmIDs") } }
 
     init() {
         let d = UserDefaults.standard
@@ -101,6 +105,9 @@ final class AppSettings {
         viewfinderGrain = d.object(forKey: "viewfinderGrain") as? Bool ?? true
         haptics = d.object(forKey: "haptics") as? Bool ?? true
         rollLength = d.object(forKey: "rollLength") as? Int ?? 36
+        favoriteFilmIDs = d.stringArray(forKey: "favoriteFilmIDs")
+            ?? ["kodak_portra_400", "kodak_gold_200", "fujifilm_pro_400h", "cinestill_800t", "kodak_tri_x_400"]
+        recentFilmIDs = d.stringArray(forKey: "recentFilmIDs") ?? []
     }
 
     private func save(_ value: Any, _ key: String) {
