@@ -261,18 +261,28 @@ final class FilmEngine: @unchecked Sendable {
         let key = Self.lutKey(recipe, size: size)
         return try await run { [self] in
             let engine = try requireEngine()
-            let n = size
-            let width = n * n, height = n
-            var grid = [Float](repeating: 1, count: width * height * 4)
+            // Each cell is a k x k block and only its centre pixel is read back:
+            // the scanner's unsharp mask (0.7 px, not on the wire) would
+            // otherwise mix neighbouring cells. The 33 blue slices are tiled
+            // 6 x 6 so the image stays square (990 x 990).
+            let n = size, k = 5, cols = 6
+            let rowsOfSlices = (n + cols - 1) / cols
+            let slice = n * k
+            let width = cols * slice, height = rowsOfSlices * slice
+            var grid = [Float](repeating: 0.5, count: width * height * 4)
             let d = Float(n - 1)
             for b in 0..<n {
+                let sx = (b % cols) * slice, sy = (b / cols) * slice
                 for g in 0..<n {
                     for r in 0..<n {
-                        // pixel (x = r + g*n, y = b)
-                        let i = (b * width + g * n + r) * 4
-                        grid[i] = Float(r) / d
-                        grid[i + 1] = Float(g) / d
-                        grid[i + 2] = Float(b) / d
+                        let rv = Float(r) / d, gv = Float(g) / d, bv = Float(b) / d
+                        for dy in 0..<k {
+                            var i = ((sy + g * k + dy) * width + sx + r * k) * 4
+                            for _ in 0..<k {
+                                grid[i] = rv; grid[i + 1] = gv; grid[i + 2] = bv; grid[i + 3] = 1
+                                i += 4
+                            }
+                        }
                     }
                 }
             }
@@ -299,10 +309,11 @@ final class FilmEngine: @unchecked Sendable {
             var out = [Float16](repeating: 1, count: n * n * n * 4)
             let scale = Float(1) / 65535
             for b in 0..<n {
-                let row = rows + b * stride
+                let sx = (b % cols) * slice, sy = (b / cols) * slice
                 for g in 0..<n {
+                    let row = rows + (sy + g * k + k / 2) * stride
                     for r in 0..<n {
-                        let src = (g * n + r) * 4
+                        let src = (sx + r * k + k / 2) * 4
                         let dst = ((b * n + g) * n + r) * 4
                         out[dst] = Float16(Float(row[src]) * scale)
                         out[dst + 1] = Float16(Float(row[src + 1]) * scale)
@@ -317,7 +328,7 @@ final class FilmEngine: @unchecked Sendable {
 
     static func lutKey(_ r: DevelopRecipe, size: Int) -> String {
         let film = r.film
-        var k = "v1|\(size)|\(r.filmID)|\(r.resolvedPaperID)|\(String(format: "%.2f", r.exposureEV))"
+        var k = "v2|\(size)|\(r.filmID)|\(r.resolvedPaperID)|\(String(format: "%.2f", r.exposureEV))"
         if film.kind.usesPrintPaper {
             k += String(format: "|%.2f|%.2f|%.2f", r.printBrightness, r.warmth, r.tint)
         }

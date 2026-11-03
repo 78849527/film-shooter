@@ -165,7 +165,12 @@ final class AppModel {
         do {
             let photo = try await camera.capturePhoto()
             advanceFrame()
-            darkroom.enqueue(.capture(photo), recipe: recipe, aspect: aspect, frameNumber: number,
+            var r = recipe
+            // A DNG is scene-linear and the phone exposes RAW low to keep the
+            // highlights, so let the engine meter it; a processed HEIC is
+            // already placed by the camera and develops as the viewfinder shows.
+            if photo.rawData != nil { r.autoExposure = true }
+            darkroom.enqueue(.capture(photo), recipe: r, aspect: aspect, frameNumber: number,
                              captureDate: photo.captureDate)
         } catch {
             show("拍摄失败：\(error.localizedDescription)")

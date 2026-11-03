@@ -43,7 +43,7 @@
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
-		<string></string>
+		<string>LaunchBackground</string>
 		<key>UIImageRespectsSafeAreaInsets</key>
 		<false/>
 	</dict>
