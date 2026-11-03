@@ -1,0 +1,95 @@
+name: FilmShooter
+options:
+  bundleIdPrefix: io.github.filmshooter
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+  developmentLanguage: zh-Hans
+  generateEmptyDirectories: false
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGN_IDENTITY: ""
+    DEVELOPMENT_TEAM: ""
+    ENABLE_BITCODE: NO
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    DEAD_CODE_STRIPPING: YES
+targets:
+  FilmShooter:
+    type: application
+    platform: iOS
+    sources:
+      - path: FilmShooter
+        excludes:
+          - "**/*.md"
+      - path: Engine/src
+        excludes:
+          - "shaders/**"
+      - path: Engine/include
+      - path: build/EngineResources
+        type: folder
+        buildPhase: resources
+      - path: Licenses
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: FilmShooter
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.filmshooter.app
+        INFOPLIST_FILE: FilmShooter/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_OBJC_BRIDGING_HEADER: FilmShooter/Engine/FilmShooter-Bridging-Header.h
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CLANG_CXX_LANGUAGE_STANDARD: c++20
+        CLANG_CXX_LIBRARY: libc++
+        CLANG_ENABLE_OBJC_ARC: YES
+        GCC_C_LANGUAGE_STANDARD: gnu17
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/Engine/include
+          - $(SRCROOT)/Engine/src
+          - $(SRCROOT)/Engine/src/core
+          - $(SRCROOT)/Engine/third_party/metal-cpp
+        OTHER_CPLUSPLUSFLAGS: "$(inherited) -Wno-shorten-64-to-32 -Wno-comma -Wno-conversion"
+        USE_HEADERMAP: NO
+        MTL_FAST_MATH: YES
+        MTL_LANGUAGE_REVISION: Metal30
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
+        GCC_OPTIMIZATION_LEVEL: "2"
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+      configs:
+        Debug:
+          GCC_OPTIMIZATION_LEVEL: "0"
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    dependencies:
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: QuartzCore.framework
+      - sdk: CoreText.framework
+      - sdk: CoreGraphics.framework
+      - sdk: Accelerate.framework
+      - sdk: CoreImage.framework
+      - sdk: CoreVideo.framework
+      - sdk: AVFoundation.framework
+      - sdk: Photos.framework
+      - sdk: PhotosUI.framework
+      - sdk: ImageIO.framework
+      - sdk: UniformTypeIdentifiers.framework
+schemes:
+  FilmShooter:
+    build:
+      targets:
+        FilmShooter: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -1,0 +1,29 @@
+# Compile the C++/Metal engine for iOS on its own (fast feedback).
+name: Engine check
+
+on:
+  push:
+    branches: [main]
+    paths: ['Engine/**', 'scripts/**', '.github/workflows/engine-check.yml']
+  workflow_dispatch:
+
+jobs:
+  engine:
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      IOS_MIN: '18.0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_*.app | grep -v beta | sort -V | tail -1)
+          sudo xcode-select -s "$XC"; xcodebuild -version
+      - name: Metal toolchain
+        run: |
+          xcrun -sdk iphoneos metal --version \
+            || (xcodebuild -downloadComponent MetalToolchain && xcrun -sdk iphoneos metal --version)
+      - name: Metal kernels (iOS, safe math)
+        run: bash scripts/build_engine_resources.sh
+      - name: Engine C++ for iOS arm64
+        run: bash scripts/check_engine_compile.sh
