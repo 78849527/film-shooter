@@ -1,52 +1,42 @@
 import SwiftUI
 
-/// The contact sheet: frames in the developing tray on top, then every print
+/// The contact sheet: frames still in the darkroom as the first cells (a
+/// negative turning into a print, traced by a progress line), then every print
 /// as a square crop. Opens from the gallery button with a zoom transition;
 /// each print opens the same way into the detail pager.
 struct GalleryView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    var opensFirstPhoto: Bool = false
-
     @Namespace private var namespace
-    @State private var openedID: UUID?
+    /// The navigation path (photo ids). Initialised with the photo to open,
+    /// so a requested push is part of the first render -- no timing involved.
+    @State private var path: [UUID]
     @State private var currentID: UUID?
     @State private var pendingDelete: DevelopedPhoto?
+    @State private var showImporter = false
+    @State private var editor: EditorModel?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
 
+    init(initialPhotoID: UUID? = nil) {
+        _path = State(initialValue: initialPhotoID.map { [$0] } ?? [])
+        _currentID = State(initialValue: initialPhotoID)
+    }
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             VStack(spacing: 0) {
                 header
                 ScrollView {
-                    VStack(spacing: 0) {
-                        let jobs = model.darkroom.jobs
-                        if !jobs.isEmpty {
-                            DevelopingTray(jobs: jobs)
-                                .padding(.bottom, 14)
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                        }
-                        let photos = model.library.photos
-                        if photos.isEmpty {
-                            if jobs.isEmpty {
-                                EmptyRollView()
-                                    .padding(.top, 70)
-                                    .transition(.opacity)
-                            }
-                        } else {
-                            grid(photos)
-                        }
-                    }
-                    .animation(Motion.standard, value: model.darkroom.jobs.map(\.id))
-                    .animation(Motion.standard, value: model.library.photos.map(\.id))
+                    content
+                        .padding(.bottom, 24)
                 }
                 .scrollIndicators(.hidden)
             }
             .background(Theme.background.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(item: $openedID) { id in
+            .navigationDestination(for: UUID.self) { id in
                 PhotoDetailView(startID: id, currentID: $currentID)
                     .navigationTransition(.zoom(sourceID: currentID ?? id, in: namespace))
             }
@@ -66,19 +56,18 @@ struct GalleryView: View {
         } message: {
             Text("冲好的照片和保留的原图都会被删除，无法恢复。")
         }
-        .task {
-            guard opensFirstPhoto else { return }
-            var waited = 0
-            while model.library.photos.isEmpty && waited < 200 {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-                waited += 1
-            }
-            // Let the cover's zoom transition finish before pushing.
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            if let first = model.library.photos.first {
-                currentID = first.id
-                openedID = first.id
-            }
+        .photoImporter(isPresented: $showImporter) { newEditor in
+            editor = newEditor
+        }
+        .fullScreenCover(item: $editor) { editor in
+            EditorView(editor: editor)
+                .environment(model)
+        }
+        .onAppear {
+            ScreenshotMode.log("gallery appeared, path \(path.count), \(model.library.photos.count) photos")
+        }
+        .onChange(of: path) { old, new in
+            ScreenshotMode.log("gallery path \(old.count) -> \(new.count)")
         }
     }
 
@@ -86,11 +75,13 @@ struct GalleryView: View {
 
     private var header: some View {
         let count = model.library.photos.count
-        return HStack(alignment: .center, spacing: 12) {
+        return HStack(alignment: .center, spacing: 10) {
             Button {
                 dismiss()
             } label: {
                 RoundIcon(systemName: "chevron.down", size: 36, iconSize: 14, fill: Theme.surface)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.pressable)
             .accessibilityLabel(Text("返回相机"))
@@ -105,47 +96,111 @@ struct GalleryView: View {
                     .contentTransition(.numericText(value: Double(count)))
             }
             Spacer()
+            Button {
+                showImporter = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "photo.badge.plus")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("导入冲洗")
+                        .font(AppFont.ui(13, .semibold))
+                }
+                .foregroundStyle(Theme.text)
+                .padding(.horizontal, 13)
+                .frame(height: 34)
+                .background(Capsule().fill(Theme.surfaceHigh))
+                .overlay(Capsule().strokeBorder(Theme.hairlineStrong, lineWidth: 1))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.pressable)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
+        .padding(.leading, 8)
+        .padding(.trailing, 16)
+        .padding(.top, 2)
+        .padding(.bottom, 8)
         .background(
-            LinearGradient(colors: [Theme.background, Theme.background.opacity(0.92), Theme.background.opacity(0)],
-                           startPoint: .top, endPoint: .bottom)
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(Theme.background.opacity(0.6))
                 .ignoresSafeArea(edges: .top)
         )
         .animation(Motion.snappy, value: count)
     }
 
-    private func grid(_ photos: [DevelopedPhoto]) -> some View {
-        LazyVGrid(columns: columns, spacing: 2) {
-            ForEach(photos) { photo in
-                Button {
-                    Haptics.tap()
-                    currentID = photo.id
-                    openedID = photo.id
-                } label: {
-                    ContactCell(photo: photo)
+    @ViewBuilder
+    private var content: some View {
+        let jobs = model.darkroom.jobs
+        let photos = model.library.photos
+        if jobs.isEmpty && photos.isEmpty {
+            EmptyRollView(onImport: { showImporter = true })
+                .padding(.top, 70)
+                .transition(.opacity)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                if !jobs.isEmpty {
+                    darkroomLine
+                        .transition(.opacity)
                 }
-                .buttonStyle(.pressable(scale: 0.97))
-                .matchedTransitionSource(id: photo.id, in: namespace)
-                .contextMenu {
-                    ShareLink(item: model.library.fileURL(for: photo)) {
-                        Label("分享", systemImage: "square.and.arrow.up")
+                LazyVGrid(columns: columns, spacing: 2) {
+                    ForEach(jobs) { job in
+                        JobCell(job: job)
+                            .transition(.opacity)
                     }
-                    Button(role: .destructive) {
-                        pendingDelete = photo
-                    } label: {
-                        Label("删除", systemImage: "trash")
+                    ForEach(photos) { photo in
+                        photoCell(photo)
+                            .transition(.opacity)
                     }
                 }
-                .transition(.scale(scale: 0.9).combined(with: .opacity))
+            }
+            .animation(Motion.standard, value: jobs.map(\.id))
+            .animation(Motion.standard, value: photos.map(\.id))
+        }
+    }
+
+    private var darkroomLine: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(Theme.lcd)
+                .frame(width: 6, height: 6)
+                .phaseAnimator([0.3, 1.0]) { content, phase in
+                    content.opacity(phase)
+                } animation: { _ in
+                    .easeInOut(duration: 0.8)
+                }
+            Text("暗房 · 正在冲洗 \(model.darkroom.pendingCount) 张")
+                .font(AppFont.ui(13, .medium))
+                .foregroundStyle(Theme.secondary)
+                .contentTransition(.numericText(value: Double(model.darkroom.pendingCount)))
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+
+    private func photoCell(_ photo: DevelopedPhoto) -> some View {
+        Button {
+            currentID = photo.id
+            ScreenshotMode.log("gallery: open photo \(photo.id)")
+            path.append(photo.id)
+        } label: {
+            ContactCell(photo: photo)
+        }
+        .buttonStyle(.pressable(scale: 0.97))
+        .matchedTransitionSource(id: photo.id, in: namespace)
+        .contextMenu {
+            ShareLink(item: model.library.fileURL(for: photo)) {
+                Label("分享", systemImage: "square.and.arrow.up")
+            }
+            Button(role: .destructive) {
+                pendingDelete = photo
+            } label: {
+                Label("删除", systemImage: "trash")
             }
         }
     }
 }
 
-// MARK: - Cell
+// MARK: - Cells
 
 struct ContactCell: View {
     let photo: DevelopedPhoto
@@ -160,11 +215,11 @@ struct ContactCell: View {
             .overlay(alignment: .bottom) {
                 HStack(spacing: 4) {
                     Text(String(format: "%02ld", photo.frameNumber))
-                        .font(AppFont.mono(9, .semibold))
+                        .font(AppFont.mono(10, .semibold))
                         .foregroundStyle(Theme.lcd)
                     Text(photo.film.name)
-                        .font(AppFont.ui(9, .medium))
-                        .foregroundStyle(Color.white.opacity(0.88))
+                        .font(AppFont.ui(11, .medium))
+                        .foregroundStyle(Color.white.opacity(0.9))
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
@@ -180,45 +235,10 @@ struct ContactCell: View {
     }
 }
 
-// MARK: - Developing tray
-
-/// Frames still in the darkroom: negatives turning into prints, with progress;
-/// failed ones offer retry / remove.
-struct DevelopingTray: View {
-    @Environment(AppModel.self) private var model
-    let jobs: [DevelopJob]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Circle().fill(Theme.lcd).frame(width: 6, height: 6)
-                    .phaseAnimator([0.3, 1.0]) { content, phase in
-                        content.opacity(phase)
-                    } animation: { _ in
-                        .easeInOut(duration: 0.8)
-                    }
-                Text("暗房 · 正在冲洗 \(model.darkroom.pendingCount) 张")
-                    .font(AppFont.ui(12, .semibold))
-                    .tracking(0.5)
-                    .foregroundStyle(Theme.secondary)
-            }
-            .padding(.horizontal, 16)
-
-            ScrollView(.horizontal) {
-                HStack(spacing: 10) {
-                    ForEach(jobs) { job in
-                        TrayCard(job: job)
-                            .transition(.scale(scale: 0.85).combined(with: .opacity))
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .scrollIndicators(.hidden)
-        }
-    }
-}
-
-struct TrayCard: View {
+/// A frame still in the darkroom, as a contact-sheet cell: the negative
+/// turning into the print, traced by a progress line; retry / remove when it
+/// failed.
+struct JobCell: View {
     @Environment(AppModel.self) private var model
     let job: DevelopJob
 
@@ -227,77 +247,81 @@ struct TrayCard: View {
             if case .failed(let m) = job.phase { return m }
             return nil
         }()
-        VStack(alignment: .leading, spacing: 6) {
-            DevelopingJobImage(job: job) { progress in
-                ZStack {
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                DevelopingJobImage(job: job) { progress in
                     if job.phase == .developing {
-                        ProgressBorder(progress: progress, cornerRadius: 10, lineWidth: 2.5)
-                    }
-                    if failure != nil {
-                        Color.black.opacity(0.5)
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(Theme.danger)
+                        ProgressBorder(progress: progress, cornerRadius: 0, lineWidth: 3)
                     }
                 }
             }
-            .frame(width: 100, height: 100)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
-
-            if let failure {
-                Text(failure)
-                    .font(AppFont.ui(10))
-                    .foregroundStyle(Theme.danger)
-                    .lineLimit(1)
-                    .frame(width: 100, alignment: .leading)
-                HStack(spacing: 6) {
-                    Button {
-                        Haptics.tap()
-                        withAnimation(Motion.standard) { model.darkroom.retry(job) }
-                    } label: {
-                        Text("重试")
-                            .font(AppFont.ui(11, .semibold))
-                            .foregroundStyle(Theme.background)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 5)
-                            .background(Capsule().fill(Theme.accent))
-                    }
-                    Button {
-                        Haptics.tap()
-                        withAnimation(Motion.standard) { model.darkroom.dismissFailed(job) }
-                    } label: {
-                        Text("移除")
-                            .font(AppFont.ui(11, .semibold))
-                            .foregroundStyle(Theme.text)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 5)
-                            .background(Capsule().fill(Theme.surfaceHigh))
-                    }
-                }
-                .buttonStyle(.pressable)
-                .frame(width: 100)
-            } else {
-                TimelineView(.animation(minimumInterval: 0.25, paused: job.phase != .developing)) { context in
-                    let p = DevelopProgress.estimate(job, now: context.date)
+            .clipped()
+            .overlay(alignment: .bottom) {
+                if failure == nil {
                     HStack(spacing: 4) {
                         Text(job.phase == .developing ? "显影中" : "排队中")
                             .font(AppFont.ui(11, .medium))
-                            .foregroundStyle(Theme.text.opacity(0.85))
-                        if job.phase == .developing {
-                            Text("\(Int(p * 100))%")
-                                .font(AppFont.mono(10, .medium))
-                                .foregroundStyle(Theme.accent)
-                        }
+                            .foregroundStyle(Color.white.opacity(0.9))
+                        Text(job.recipe.film.name)
+                            .font(AppFont.ui(11))
+                            .foregroundStyle(Color.white.opacity(0.7))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
                     }
+                    .padding(.horizontal, 6)
+                    .padding(.top, 14)
+                    .padding(.bottom, 5)
+                    .background(LinearGradient(colors: [Color.black.opacity(0), Color.black.opacity(0.55)],
+                                               startPoint: .top, endPoint: .bottom))
                 }
-                Text(job.recipe.film.name)
-                    .font(AppFont.ui(10))
-                    .foregroundStyle(Theme.secondary)
-                    .lineLimit(1)
             }
-        }
-        .frame(width: 100, alignment: .leading)
+            .overlay {
+                if let failure {
+                    ZStack {
+                        Color.black.opacity(0.6)
+                        VStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 17))
+                                .foregroundStyle(Theme.danger)
+                            Text(failure)
+                                .font(AppFont.ui(11))
+                                .foregroundStyle(Theme.text.opacity(0.85))
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                            HStack(spacing: 6) {
+                                Button {
+                                    Haptics.tap()
+                                    withAnimation(Motion.standard) { model.darkroom.retry(job) }
+                                } label: {
+                                    Text("重试")
+                                        .font(AppFont.ui(11, .semibold))
+                                        .foregroundStyle(Theme.background)
+                                        .padding(.horizontal, 10)
+                                        .frame(height: 26)
+                                        .background(Capsule().fill(Theme.accent))
+                                }
+                                Button {
+                                    Haptics.tap()
+                                    withAnimation(Motion.standard) { model.darkroom.dismissFailed(job) }
+                                } label: {
+                                    Text("移除")
+                                        .font(AppFont.ui(11, .semibold))
+                                        .foregroundStyle(Theme.text)
+                                        .padding(.horizontal, 10)
+                                        .frame(height: 26)
+                                        .background(Capsule().fill(Color.white.opacity(0.14)))
+                                }
+                            }
+                            .buttonStyle(.pressable)
+                        }
+                        .padding(8)
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .animation(Motion.fade, value: failure)
+            .accessibilityElement(children: .contain)
     }
 }
 
@@ -305,6 +329,8 @@ struct TrayCard: View {
 
 /// A strip of unexposed film and a gentle prompt.
 struct EmptyRollView: View {
+    var onImport: (() -> Void)? = nil
+
     @State private var drift = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -321,6 +347,22 @@ struct EmptyRollView: View {
                 Text("按下快门，照片会在暗房里慢慢显影")
                     .font(AppFont.ui(13))
                     .foregroundStyle(Theme.secondary)
+            }
+            if let onImport {
+                Button(action: onImport) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("从相册导入一张")
+                            .font(AppFont.ui(13, .semibold))
+                    }
+                    .foregroundStyle(Theme.text)
+                    .padding(.horizontal, 16)
+                    .frame(height: 36)
+                    .background(Capsule().fill(Theme.surfaceHigh))
+                    .overlay(Capsule().strokeBorder(Theme.hairlineStrong, lineWidth: 1))
+                }
+                .buttonStyle(.pressable)
             }
         }
         .frame(maxWidth: .infinity)

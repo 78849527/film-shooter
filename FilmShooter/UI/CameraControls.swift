@@ -4,31 +4,34 @@ import AVFoundation
 
 // MARK: - Top bar
 
+/// 36 pt controls with 44 pt hit areas on a 44 pt bar; the frame counter in
+/// the middle.
 struct TopBar: View {
     @Binding var showAspectPicker: Bool
     let openSettings: () -> Void
 
     var body: some View {
         ZStack {
-            HStack(spacing: 8) {
+            HStack(spacing: 0) {
                 FlashButton()
                 AspectButton(isOpen: $showAspectPicker)
                 Spacer(minLength: 0)
                 RAWButton()
                 Button {
-                    Haptics.tap()
                     openSettings()
                 } label: {
                     RoundIcon(systemName: "gearshape", size: 36, iconSize: 15)
                         .uprightWithDevice()
+                        .padding(4)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.pressable)
                 .accessibilityLabel(Text("设置"))
             }
             FrameCounter()
         }
-        .padding(.horizontal, 14)
-        .frame(height: 50)
+        .padding(.horizontal, 10)
+        .frame(height: 44)
         .animation(Motion.snappy, value: showAspectPicker)
     }
 }
@@ -53,7 +56,8 @@ struct FlashButton: View {
                         .background(Circle().fill(Theme.surface))
                         .overlay(Circle().strokeBorder(Theme.hairline, lineWidth: 1))
                         .uprightWithDevice()
-                        .contentShape(Circle())
+                        .padding(4)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.pressable)
                 .accessibilityLabel(Text("闪光灯：\(Self.title(camera.flashMode))"))
@@ -99,21 +103,21 @@ struct AspectButton: View {
     var body: some View {
         let aspect = model.settings.frameAspect
         Button {
-            Haptics.tap()
             withAnimation(Motion.standard) { isOpen.toggle() }
         } label: {
             HStack(spacing: 6) {
-                AspectGlyph(aspect: CGFloat(aspect.portraitAspect), selected: isOpen, size: 14)
+                AspectGlyph(aspect: CGFloat(aspect.portraitAspect), selected: false, size: 14)
                 Text(aspect.title)
                     .font(AppFont.ui(13, .semibold))
-                    .foregroundStyle(isOpen ? Theme.accent : Theme.text)
+                    .foregroundStyle(Theme.text)
                     .contentTransition(.interpolate)
             }
             .padding(.horizontal, 11)
             .frame(height: 36)
             .background(Capsule().fill(Theme.surface))
             .overlay(Capsule().strokeBorder(isOpen ? Theme.accent.opacity(0.5) : Theme.hairline, lineWidth: 1))
-            .contentShape(Capsule())
+            .padding(4)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
         .animation(Motion.snappy, value: aspect)
@@ -121,6 +125,8 @@ struct AspectButton: View {
     }
 }
 
+/// A 36 pt capsule like the aspect button: amber when RAW is on; when off,
+/// secondary text with a diagonal slash.
 struct RAWButton: View {
     @Environment(AppModel.self) private var model
 
@@ -135,17 +141,22 @@ struct RAWButton: View {
                     model.show(on ? "已关闭 RAW" : "RAW 已开启 · 同时保存 DNG 底片", seconds: 1.6)
                 } label: {
                     Text("RAW")
-                        .font(AppFont.mono(11, .bold))
+                        .font(AppFont.mono(12, .bold))
                         .foregroundStyle(on ? Theme.background : Theme.secondary)
-                        .strikethrough(!on, color: Theme.secondary.opacity(0.7))
-                        .padding(.horizontal, 8)
-                        .frame(height: 26)
-                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(on ? Theme.accent : Color.clear))
-                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(on ? Color.clear : Theme.hairlineStrong, lineWidth: 1))
+                        .overlay {
+                            if !on {
+                                Capsule()
+                                    .fill(Theme.secondary)
+                                    .frame(width: 30, height: 1.2)
+                                    .rotationEffect(.degrees(-24))
+                            }
+                        }
                         .uprightWithDevice()
+                        .padding(.horizontal, 12)
                         .frame(height: 36)
+                        .background(Capsule().fill(on ? Theme.accent : Theme.surface))
+                        .overlay(Capsule().strokeBorder(on ? Color.clear : Theme.hairline, lineWidth: 1))
+                        .padding(4)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.pressable)
@@ -157,7 +168,7 @@ struct RAWButton: View {
     }
 }
 
-/// The analog frame counter: big LCD digits over unlit "88" segments, "/36".
+/// The analog frame counter: LCD digits and "/36" on a 36 pt black plate.
 struct FrameCounter: View {
     @Environment(AppModel.self) private var model
 
@@ -165,20 +176,16 @@ struct FrameCounter: View {
         let n = model.frameNumber
         let total = model.settings.rollLength
         HStack(alignment: .firstTextBaseline, spacing: 1) {
-            ZStack {
-                Text("88")
-                    .lcdText(22, color: Theme.lcd.opacity(0.08), glow: false)
-                Text(String(format: "%02ld", n))
-                    .lcdText(22)
-                    .contentTransition(.numericText(value: Double(n)))
-            }
+            Text(String(format: "%02ld", n))
+                .lcdText(20)
+                .contentTransition(.numericText(value: Double(n)))
             Text("/\(total)")
                 .lcdText(11, color: Theme.lcd.opacity(0.5), glow: false)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 2)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.black))
-        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Theme.lcd.opacity(0.16), lineWidth: 1))
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.black))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.lcd.opacity(0.14), lineWidth: 1))
         .animation(Motion.bouncy, value: n)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("第 \(n) 张，共 \(total) 张"))
@@ -209,9 +216,9 @@ struct AspectPickerPanel: View {
                         AspectGlyph(aspect: CGFloat(aspect.portraitAspect), selected: selected, size: 28)
                         Text(aspect.title)
                             .font(AppFont.ui(13, .semibold))
-                            .foregroundStyle(selected ? Theme.accent : Theme.text)
+                            .foregroundStyle(selected ? Theme.text : Theme.text.opacity(0.85))
                         Text(aspect.subtitle)
-                            .font(AppFont.ui(9.5))
+                            .font(AppFont.ui(11))
                             .foregroundStyle(Theme.secondary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
@@ -219,7 +226,7 @@ struct AspectPickerPanel: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 11)
                     .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(selected ? Theme.accent.opacity(0.12) : Color.clear))
+                        .fill(selected ? Color.white.opacity(0.08) : Color.clear))
                     .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .strokeBorder(selected ? Theme.accent.opacity(0.55) : Color.clear, lineWidth: 1))
                     .contentShape(Rectangle())
@@ -253,35 +260,40 @@ struct AspectGlyph: View {
 
 // MARK: - Deck
 
-/// Gallery thumbnail, shutter, import and flip.
+/// [gallery 50] — shutter — [flip 50]. Importing a photo lives in the gallery
+/// (and in the gallery button's context menu).
 struct ControlDeck: View {
     let namespace: Namespace.ID
     @Binding var editor: EditorModel?
     let openGallery: () -> Void
 
+    @State private var showImporter = false
+
     var body: some View {
         ZStack {
             ShutterButton()
             HStack(alignment: .center) {
-                GalleryButton(namespace: namespace, action: openGallery)
+                GalleryButton(namespace: namespace, action: openGallery, importPhoto: { showImporter = true })
                 Spacer(minLength: 0)
-                HStack(spacing: 12) {
-                    ImportButton(editor: $editor)
-                    FlipButton()
-                }
+                FlipButton()
             }
         }
-        .padding(.horizontal, 22)
-        .frame(height: 92)
+        .padding(.horizontal, 28)
+        .frame(height: 88)
+        .photoImporter(isPresented: $showImporter) { newEditor in
+            editor = newEditor
+        }
     }
 }
 
 /// The latest print -- or, while frames are developing, the current one as a
 /// negative turning positive, traced by a progress line, with a count badge.
+/// Long-press for "导入照片冲洗".
 struct GalleryButton: View {
     @Environment(AppModel.self) private var model
     let namespace: Namespace.ID
     let action: () -> Void
+    let importPhoto: () -> Void
 
     var body: some View {
         let darkroom = model.darkroom
@@ -292,32 +304,30 @@ struct GalleryButton: View {
             return false
         }
         let photos = model.library.photos
-        let last = darkroom.lastDeveloped.flatMap { p in photos.contains(where: { $0.id == p.id }) ? p : nil }
+        let last = darkroom.lastDeveloped.flatMap { p in photos.first(where: { $0.id == p.id }) }
             ?? photos.first
-        Button {
-            Haptics.tap()
-            action()
-        } label: {
+        Button(action: action) {
             ZStack {
                 Theme.surface
                 if let job = active {
                     DevelopingJobImage(job: job) { progress in
-                        ProgressBorder(progress: progress, cornerRadius: 12, lineWidth: 2.5)
+                        ProgressBorder(progress: progress, cornerRadius: 10, lineWidth: 2.5)
                     }
+                    .id(job.id)
                     .transition(.opacity)
                 } else if let last {
                     LibraryThumbnail(photo: last)
-                        .id(last.fileName)
+                        .id(last.thumbName)
                         .transition(.opacity)
                 } else {
                     Image(systemName: "photo.on.rectangle")
-                        .font(.system(size: 18, weight: .light))
+                        .font(.system(size: 17, weight: .light))
                         .foregroundStyle(Theme.secondary)
                 }
             }
-            .frame(width: 54, height: 54)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .frame(width: 50, height: 50)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Theme.hairlineStrong, lineWidth: 1))
             .overlay(alignment: .topTrailing) {
                 badge(count: darkroom.pendingCount, failed: hasFailed)
@@ -328,13 +338,23 @@ struct GalleryButton: View {
                 .spring(response: 0.26, dampingFraction: 0.6)
             }
             .animation(.easeInOut(duration: 0.45), value: active?.id)
-            .animation(.easeInOut(duration: 0.45), value: last?.fileName)
+            .animation(.easeInOut(duration: 0.45), value: last?.thumbName)
             .uprightWithDevice()
+            .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
         .matchedTransitionSource(id: "gallery", in: namespace)
+        .contextMenu {
+            Button(action: action) {
+                Label("打开底片册", systemImage: "photo.on.rectangle")
+            }
+            Button(action: importPhoto) {
+                Label("导入照片冲洗", systemImage: "photo.badge.plus")
+            }
+        }
         .onChange(of: darkroom.completedCount) { _, _ in Haptics.softTap(0.7) }
         .accessibilityLabel(Text("底片册"))
+        .accessibilityHint(Text("长按可导入照片冲洗"))
     }
 
     @ViewBuilder
@@ -364,9 +384,14 @@ struct GalleryButton: View {
     }
 }
 
-/// Outer ring and a pale inner disc that sinks under the thumb.
+// MARK: - Shutter
+
+/// A chrome release button inside an advance ring: the ring's fine ticks turn
+/// one notch per frame; only the disc sinks under the thumb.
 struct ShutterButton: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var notch = 0
 
     var body: some View {
         let camera = model.camera
@@ -376,49 +401,83 @@ struct ShutterButton: View {
             guard !camera.isCapturing else { return }
             Task { await model.shoot() }
         } label: {
-            ShutterFace(isLive: live, isBusy: busy)
+            Color.clear
         }
-        .buttonStyle(ShutterButtonStyle())
+        .buttonStyle(ShutterButtonStyle(isLive: live, isBusy: busy, notch: notch))
         .disabled(!live)
+        .onChange(of: model.frameNumber) { _, _ in
+            // Always forward, also when the roll wraps to 1.
+            if !reduceMotion { notch += 1 }
+        }
         .accessibilityLabel(Text("快门"))
+    }
+}
+
+/// Fine ticks around a circle (the film-advance ring).
+struct TickRing: Shape {
+    var count = 36
+    var length: CGFloat = 3.5
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = min(rect.width, rect.height) / 2
+        for i in 0..<count {
+            let a = CGFloat(i) / CGFloat(count) * 2 * .pi
+            p.move(to: CGPoint(x: c.x + cos(a) * (r - length), y: c.y + sin(a) * (r - length)))
+            p.addLine(to: CGPoint(x: c.x + cos(a) * r, y: c.y + sin(a) * r))
+        }
+        return p
     }
 }
 
 struct ShutterFace: View {
     let isLive: Bool
-    let isBusy: Bool
+    let isDown: Bool
+    let notch: Int
 
     var body: some View {
         ZStack {
             Circle()
-                .strokeBorder(Theme.text.opacity(isLive ? 0.95 : 0.3), lineWidth: 3.5)
+                .strokeBorder(Theme.text.opacity(0.92), lineWidth: 2.5)
                 .frame(width: 80, height: 80)
+            TickRing()
+                .stroke(Theme.text.opacity(0.28), style: StrokeStyle(lineWidth: 1, lineCap: .round))
+                .frame(width: 72, height: 72)
+                .rotationEffect(.degrees(Double(notch) * 10))
             Circle()
-                .fill(RadialGradient(colors: [Color(hex: 0xFBF8F2), Color(hex: 0xD9D1C5)],
-                                     center: UnitPoint(x: 0.4, y: 0.32), startRadius: 2, endRadius: 42))
-                .overlay(Circle().strokeBorder(Color.black.opacity(0.07), lineWidth: 1).padding(7))
-                .frame(width: 66, height: 66)
-                .scaleEffect(isBusy ? 0.86 : 1)
-                .opacity(isLive ? 1 : 0.3)
+                .fill(RadialGradient(colors: [Color.white, Color(hex: 0xEDE8DF), Color(hex: 0xC9C1B4)],
+                                     center: UnitPoint(x: 0.38, y: 0.3), startRadius: 1, endRadius: 38))
+                .overlay(Circle().strokeBorder(Color.black.opacity(0.12), lineWidth: 0.75))
+                .frame(width: 60, height: 60)
+                .shadow(color: .black.opacity(isDown ? 0.1 : 0.35), radius: isDown ? 1 : 3, y: isDown ? 0.5 : 1.5)
+                .scaleEffect(isDown ? 0.9 : 1)
+                .brightness(isDown ? -0.06 : 0)
         }
         .frame(width: 84, height: 84)
+        .opacity(isLive ? 1 : 0.35)
         .contentShape(Circle())
-        .animation(.spring(response: 0.24, dampingFraction: 0.62), value: isBusy)
+        .animation(.spring(response: 0.18, dampingFraction: 0.7), value: isDown)
+        .animation(.spring(response: 0.5, dampingFraction: 0.75), value: notch)
         .animation(.easeOut(duration: 0.3), value: isLive)
     }
 }
 
 @MainActor
 struct ShutterButtonStyle: ButtonStyle {
+    let isLive: Bool
+    let isBusy: Bool
+    let notch: Int
+
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.9 : 1)
-            .animation(.spring(response: 0.22, dampingFraction: 0.6), value: configuration.isPressed)
+        ShutterFace(isLive: isLive, isDown: configuration.isPressed || isBusy, notch: notch)
             .onChange(of: configuration.isPressed) { _, pressed in
-                if pressed { Haptics.shutter() }
+                if pressed { Haptics.softTap(0.55) }
             }
     }
 }
+
+// MARK: - Flip
 
 /// Front/back with a 3D flip of the icon.
 struct FlipButton: View {
@@ -453,64 +512,51 @@ struct FlipButton: View {
     }
 }
 
-/// Pick a photo from the library and open it in the darkroom editor.
-struct ImportButton: View {
+// MARK: - Import
+
+/// Presents the photo picker and turns the picked photo into a darkroom
+/// editor (`onEditor`). Shared by the gallery header and the gallery button.
+@MainActor
+struct PhotoImporter: ViewModifier {
     @Environment(AppModel.self) private var model
-    @Binding var editor: EditorModel?
+    @Binding var isPresented: Bool
+    let onEditor: (EditorModel) -> Void
 
     @State private var item: PhotosPickerItem?
-    @State private var isLoading = false
 
-    var body: some View {
-        PhotosPicker(selection: $item, matching: .images, preferredItemEncoding: .current) {
-            ZStack {
-                if isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(Theme.text)
-                        .transition(.opacity)
-                } else {
-                    Image(systemName: "photo.badge.plus")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Theme.text)
-                        .uprightWithDevice()
-                        .transition(.opacity)
-                }
+    func body(content: Content) -> some View {
+        content
+            .photosPicker(isPresented: $isPresented, selection: $item, matching: .images,
+                          preferredItemEncoding: .current)
+            .onChange(of: item) { _, newItem in
+                guard let newItem else { return }
+                load(newItem)
             }
-            .frame(width: 40, height: 40)
-            .background(Circle().fill(Theme.surface))
-            .overlay(Circle().strokeBorder(Theme.hairline, lineWidth: 1))
-            .contentShape(Circle())
-            .animation(Motion.fade, value: isLoading)
-        }
-        .buttonStyle(.pressable)
-        .disabled(isLoading)
-        .accessibilityLabel(Text("导入照片冲洗"))
-        .onChange(of: item) { _, newItem in
-            guard let newItem else { return }
-            load(newItem)
-        }
     }
 
     private func load(_ picked: PhotosPickerItem) {
-        isLoading = true
+        model.show("正在读取照片…", seconds: 8)
         Task {
-            defer {
-                isLoading = false
-                item = nil
-            }
+            defer { item = nil }
             do {
                 guard let data = try await picked.loadTransferable(type: Data.self) else {
                     model.show("无法读取这张照片")
                     return
                 }
                 let isRAW = PhotoDecoder.isRAW(data: data)
-                Haptics.tap()
-                editor = EditorModel(source: .imported(data: data, isRAW: isRAW), recipe: model.recipe,
-                                     outputLongEdge: model.settings.outputQuality.longEdge)
+                model.banner = nil
+                onEditor(EditorModel(source: .imported(data: data, isRAW: isRAW), recipe: model.recipe,
+                                     outputLongEdge: model.settings.outputQuality.longEdge))
             } catch {
                 model.show("导入失败：\(error.localizedDescription)")
             }
         }
+    }
+}
+
+extension View {
+    /// The photo picker → darkroom editor flow.
+    func photoImporter(isPresented: Binding<Bool>, onEditor: @escaping (EditorModel) -> Void) -> some View {
+        modifier(PhotoImporter(isPresented: isPresented, onEditor: onEditor))
     }
 }

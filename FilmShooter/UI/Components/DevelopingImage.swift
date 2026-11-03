@@ -100,20 +100,47 @@ enum DevelopProgress {
     }
 }
 
-/// A job's picture with its live progress (only the developing job ticks;
-/// queued and failed jobs are static, so their timelines are paused).
+/// A job's picture with its progress. The progress is an animated state
+/// (one long ease-out towards 95 % per development) rather than a timeline,
+/// so the view is not re-evaluated every frame.
 struct DevelopingJobImage<Overlay: View>: View {
     let job: DevelopJob
     @ViewBuilder var overlay: (Double) -> Overlay
 
+    @State private var progress: Double
+    @State private var animationTask: Task<Void, Never>?
+
+    init(job: DevelopJob, @ViewBuilder overlay: @escaping (Double) -> Overlay) {
+        self.job = job
+        self.overlay = overlay
+        _progress = State(initialValue: DevelopProgress.estimate(job, now: Date()))
+    }
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: job.phase != .developing)) { context in
-            let p = DevelopProgress.estimate(job, now: context.date)
-            ZStack {
-                NegativePositive(image: job.preview, progress: p,
-                                 isMonochrome: job.recipe.film.kind == .blackWhite)
-                overlay(p)
-            }
+        ZStack {
+            NegativePositive(image: job.preview, progress: progress,
+                             isMonochrome: job.recipe.film.kind == .blackWhite)
+            overlay(progress)
+        }
+        .onAppear { run() }
+        .onChange(of: job.phase) { _, _ in run() }
+        .onChange(of: job.startedAt) { _, _ in run() }
+        .onDisappear { animationTask?.cancel() }
+    }
+
+    private func run() {
+        animationTask?.cancel()
+        let current = DevelopProgress.estimate(job, now: Date())
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) { progress = current }
+        guard job.phase == .developing, let start = job.startedAt else { return }
+        let remaining = max(0.4, job.expectedSeconds - Date().timeIntervalSince(start))
+        animationTask = Task {
+            // Let the current value render before animating away from it.
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: remaining)) { progress = 0.95 }
         }
     }
 }
@@ -156,19 +183,34 @@ struct ProgressRing: View {
 
 // MARK: - Library thumbnail
 
-/// A developed print's cached contact-sheet thumbnail.
+/// A developed print's contact-sheet thumbnail: from the memory cache when
+/// it is there, otherwise decoded off the main thread and faded in.
 struct LibraryThumbnail: View {
     @Environment(AppModel.self) private var model
     let photo: DevelopedPhoto
     var contentMode: ContentMode = .fill
 
+    @State private var image: UIImage?
+
     var body: some View {
-        if let image = model.library.thumbnail(for: photo) {
-            Image(uiImage: image)
-                .resizable()
-                .aspectRatio(contentMode: contentMode)
-        } else {
+        let shown = image ?? model.library.cachedThumbnail(for: photo)
+        ZStack {
             Theme.surfaceHigh
+            if let shown {
+                Image(uiImage: shown)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+                    .transition(.opacity)
+            }
+        }
+        .task(id: photo.thumbName) {
+            if let cached = model.library.cachedThumbnail(for: photo) {
+                image = cached
+                return
+            }
+            let loaded = await model.library.loadThumbnail(for: photo)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) { image = loaded }
         }
     }
 }

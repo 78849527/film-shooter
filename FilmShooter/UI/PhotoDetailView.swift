@@ -48,6 +48,9 @@ struct PhotoDetailView: View {
         }
         .animation(Motion.standard, value: chromeHidden)
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            ScreenshotMode.log("detail appeared for \(startID), \(model.library.photos.count) photos")
+        }
         .onChange(of: scrolledID) { _, new in
             currentID = new
             if isZoomed { isZoomed = false }
@@ -159,7 +162,6 @@ struct PhotoDetailView: View {
                                 busy: isSaving)
                 }
                 Button {
-                    Haptics.tap()
                     editor = EditorModel(source: .existing(photo), recipe: photo.recipe,
                                          outputLongEdge: model.settings.outputQuality.longEdge)
                 } label: {
@@ -168,7 +170,6 @@ struct PhotoDetailView: View {
                 .disabled(photo.originalName == nil)
                 .opacity(photo.originalName == nil ? 0.35 : 1)
                 Button {
-                    Haptics.tap()
                     confirmDelete = true
                 } label: {
                     actionLabel("trash", "删除")
@@ -200,7 +201,7 @@ struct PhotoDetailView: View {
             }
             .frame(height: 22)
             Text(title)
-                .font(AppFont.ui(10.5, .medium))
+                .font(AppFont.ui(11, .medium))
         }
         .foregroundStyle(Theme.text)
         .frame(maxWidth: .infinity)
@@ -254,6 +255,7 @@ struct PhotoPage: View {
     let onTap: () -> Void
 
     @State private var full: UIImage?
+    @State private var thumb: UIImage?
     @State private var original: UIImage?
     @State private var scale: CGFloat = 1
     @State private var baseScale: CGFloat = 1
@@ -265,7 +267,7 @@ struct PhotoPage: View {
         GeometryReader { geo in
             let fitted = LayoutMath.fit(aspect: CGFloat(photo.aspect), in: geo.size)
             ZStack {
-                CrossfadeImage(image: full ?? model.library.thumbnail(for: photo), duration: 0.3)
+                CrossfadeImage(image: full ?? thumb ?? model.library.cachedThumbnail(for: photo), duration: 0.3)
                     .frame(width: fitted.width, height: fitted.height)
                 if holding, let original {
                     Image(uiImage: original)
@@ -300,6 +302,11 @@ struct PhotoPage: View {
             .animation(.easeOut(duration: 0.15), value: original == nil)
         }
         .task(id: photo.fileName) {
+            if model.library.cachedThumbnail(for: photo) == nil {
+                let small = await model.library.loadThumbnail(for: photo)
+                guard !Task.isCancelled else { return }
+                thumb = small
+            }
             let image = await model.library.displayImage(for: photo, maxPixel: 2400)
             guard !Task.isCancelled else { return }
             full = image

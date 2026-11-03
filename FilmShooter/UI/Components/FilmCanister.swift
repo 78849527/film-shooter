@@ -1,21 +1,23 @@
 import SwiftUI
 
 /// A 135 film cartridge lying on its side, drawn entirely in SwiftUI: metal
-/// caps, the stock's body colour and band, brand in tracked small caps, the
-/// name in rounded semibold, ISO and process badge, cylinder shading and a soft
-/// specular line. Rasterised once (`drawingGroup`) so carousels only move a
-/// texture around.
+/// caps, the film leader poking out by the felt lip, the stock's body colour
+/// and band, brand in tracked small caps, the name in rounded semibold, ISO and
+/// process badge, cylinder shading and a soft specular line. Rasterised once
+/// (`drawingGroup`) so carousels only move a texture around.
 struct FilmCanister: View {
     let film: FilmStock
     /// Overall height; the width follows (`width(forHeight:)`).
     var height: CGFloat = 80
 
-    static let aspect: CGFloat = 138.0 / 84.0
+    static let aspect: CGFloat = 147.5 / 84.0
     static func width(forHeight height: CGFloat) -> CGFloat { height * aspect }
 
     var body: some View {
         let s = height / 84
         HStack(spacing: 0) {
+            leader(s)
+                .offset(y: 6 * s)
             MetalCap(width: 7 * s, height: 84 * s, corner: 2.4 * s)
             label(s)
                 .frame(width: 116 * s, height: 77 * s)
@@ -23,7 +25,7 @@ struct FilmCanister: View {
             // Spool end.
             MetalCap(width: 7.5 * s, height: 30 * s, corner: 2 * s)
         }
-        .frame(width: 138 * s, height: 84 * s)
+        .frame(width: 147.5 * s, height: 84 * s)
         .drawingGroup()
         .accessibilityElement()
         .accessibilityLabel(Text("\(film.displayName)，ISO \(film.iso)，\(film.kind.title)"))
@@ -91,8 +93,49 @@ struct FilmCanister: View {
                            startPoint: .leading, endPoint: .trailing)
                 .frame(height: 1.4 * s)
                 .offset(y: 4 * s)
+
+            // The black felt light-trap the film comes out of.
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.black.opacity(0.55))
+                    .frame(width: 3 * s)
+                Rectangle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: 0.6 * s)
+                Spacer(minLength: 0)
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: 2 * s, style: .continuous))
+    }
+
+    /// The brown film leader with a rounded tongue and a few perforations.
+    private func leader(_ s: CGFloat) -> some View {
+        ZStack {
+            UnevenRoundedRectangle(topLeadingRadius: 4.5 * s, bottomLeadingRadius: 4.5 * s,
+                                   bottomTrailingRadius: 0, topTrailingRadius: 0, style: .continuous)
+                .fill(LinearGradient(colors: [Color(hex: 0x5A3317), Color(hex: 0x2E1A0B)],
+                                     startPoint: .top, endPoint: .bottom))
+            VStack {
+                HStack(spacing: 2 * s) {
+                    perforation(s)
+                    perforation(s)
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 2 * s) {
+                    perforation(s)
+                    perforation(s)
+                }
+            }
+            .padding(.vertical, 2.5 * s)
+            .padding(.leading, 3 * s)
+        }
+        .frame(width: 10 * s, height: 30 * s)
+    }
+
+    private func perforation(_ s: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 0.5 * s, style: .continuous)
+            .fill(Color.black.opacity(0.55))
+            .frame(width: 2 * s, height: 1.6 * s)
     }
 }
 

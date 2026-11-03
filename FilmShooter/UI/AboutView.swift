@@ -57,7 +57,7 @@ struct AboutView: View {
                     .padding(.top, 12)
 
                 Text("基于 SpektraLab 光谱胶片引擎的非官方 iOS 移植。用光谱模型重现胶片的感光、显影与放大冲印，在手机上拍一卷真正的“胶卷”。")
-                    .font(AppFont.ui(14))
+                    .font(AppFont.ui(15))
                     .foregroundStyle(Theme.text.opacity(0.88))
                     .lineSpacing(5)
                     .multilineTextAlignment(.center)
@@ -65,16 +65,16 @@ struct AboutView: View {
 
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "info.circle.fill")
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(Theme.secondary)
                     Text("本应用为非官方作品，与 SpektraLab 及其作者没有任何隶属或合作关系，也未获其认可或背书。")
-                        .font(AppFont.ui(12.5))
+                        .font(AppFont.ui(13))
                         .foregroundStyle(Theme.secondary)
                         .lineSpacing(3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .surfaceCard(radius: 14, fill: Theme.accent.opacity(0.07))
+                .surfaceCard(radius: 14, fill: Color.white.opacity(0.04))
 
                 ControlSection(title: "致谢") {
                     ForEach(Array(credits.enumerated()), id: \.element.id) { index, credit in
@@ -95,16 +95,14 @@ struct AboutView: View {
                             if index > 0 {
                                 Rectangle().fill(Theme.hairline).frame(height: 1)
                             }
-                            NavigationLink {
-                                LicenseTextView(file: file)
-                            } label: {
+                            NavigationLink(value: SettingsRoute.license(file)) {
                                 HStack(spacing: 12) {
                                     Image(systemName: "doc.text")
                                         .font(.system(size: 14))
-                                        .foregroundStyle(Theme.accent)
+                                        .foregroundStyle(Theme.secondary)
                                         .frame(width: 20)
                                     Text(file.name)
-                                        .font(AppFont.ui(14, .medium))
+                                        .font(AppFont.ui(15, .medium))
                                         .foregroundStyle(Theme.text)
                                         .lineLimit(1)
                                         .minimumScaleFactor(0.8)
@@ -130,10 +128,11 @@ struct AboutView: View {
             .padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
-        .background(Theme.background.ignoresSafeArea())
+        .background { SheetBackground() }
         .navigationTitle("关于")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .onAppear { ScreenshotMode.log("about appeared") }
         .task { licenses = LicenseFile.bundled() }
     }
 
@@ -151,12 +150,12 @@ struct AboutView: View {
             }
             .frame(height: 120)
             Text("胶片机")
-                .font(AppFont.ui(30, .semibold))
+                .font(AppFont.ui(28, .semibold))
                 .foregroundStyle(Theme.text)
             Text("FILMSHOOTER · \(Self.versionString)")
                 .font(AppFont.mono(11, .medium))
                 .tracking(2)
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.secondary)
         }
     }
 
@@ -164,18 +163,18 @@ struct AboutView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
                 Text(credit.title)
-                    .font(AppFont.ui(14.5, .semibold))
+                    .font(AppFont.ui(15, .semibold))
                     .foregroundStyle(Theme.text)
                 Spacer(minLength: 8)
                 Text(credit.license)
                     .font(AppFont.mono(10, .medium))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(Theme.accent.opacity(0.1)))
+                    .background(Capsule().fill(Color.white.opacity(0.07)))
             }
             Text(credit.holder)
-                .font(AppFont.ui(12.5, .medium))
+                .font(AppFont.ui(13, .medium))
                 .foregroundStyle(Theme.text.opacity(0.75))
             Text(credit.detail)
                 .font(AppFont.ui(12))
@@ -211,10 +210,10 @@ struct LicenseTextView: View {
                     .padding(.top, 80)
             }
         }
-        .background(Theme.background.ignoresSafeArea())
+        .background { SheetBackground() }
         .navigationTitle(file.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .animation(Motion.fade, value: paragraphs == nil)
         .task {
             let url = file.url

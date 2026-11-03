@@ -46,9 +46,11 @@ enum Theme {
 // MARK: - Type
 
 enum AppFont {
-    /// Rounded UI text.
+    /// UI text. The default design: SF Rounded has no CJK glyphs, so mixed
+    /// Chinese/Latin strings pair badly with it. Sizes in use: 10 (tracked
+    /// Latin caps only), 11, 12, 13, 15, 17, 20, 28, 34.
     static func ui(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
+        .system(size: size, weight: weight, design: .default)
     }
 
     /// Monospaced numbers (counters, readouts).
@@ -73,7 +75,7 @@ struct LCDTextStyle: ViewModifier {
             .font(AppFont.lcd(size))
             .monospacedDigit()
             .foregroundStyle(color)
-            .shadow(color: glow ? color.opacity(0.55) : .clear, radius: glow ? max(1.5, size * 0.18) : 0)
+            .shadow(color: glow ? color.opacity(0.4) : .clear, radius: glow ? max(1, size * 0.09) : 0)
     }
 }
 
@@ -221,17 +223,20 @@ struct PrimaryCapsule: View {
     let title: String
     var systemImage: String? = nil
     var isEnabled: Bool = true
+    /// Fixed height (e.g. 34 in toolbars); nil = 44.
+    var height: CGFloat? = nil
 
     var body: some View {
+        let h = height ?? 44
         HStack(spacing: 6) {
             if let systemImage {
-                Image(systemName: systemImage).font(.system(size: 14, weight: .semibold))
+                Image(systemName: systemImage).font(.system(size: h < 40 ? 12 : 14, weight: .semibold))
             }
-            Text(title).font(AppFont.ui(15, .semibold))
+            Text(title).font(AppFont.ui(h < 40 ? 13 : 15, .semibold))
         }
         .foregroundStyle(Theme.background)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
+        .padding(.horizontal, h < 40 ? 14 : 20)
+        .frame(height: h)
         .background(Capsule().fill(isEnabled ? Theme.accent : Theme.tertiary))
         .contentShape(Capsule())
     }
@@ -259,4 +264,18 @@ enum LayoutMath {
 /// which is exactly the centre crop the darkroom makes.
 enum ViewfinderGeometry {
     static let sensorAspect: CGFloat = 3.0 / 4.0
+}
+
+// MARK: - Sheets
+
+/// The one sheet background used everywhere: a thin material darkened
+/// towards the app background.
+struct SheetBackground: View {
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial)
+            Theme.background.opacity(0.6)
+        }
+        .ignoresSafeArea()
+    }
 }

@@ -4,7 +4,8 @@ import SwiftUI
 
 /// A film-darkroom slider: hairline track, a notch at the default value, an
 /// amber fill from the notch to the thumb, a value bubble while dragging, a
-/// soft detent at the default and double-tap to reset.
+/// soft detent at the default and double-tap to reset. Range labels (冷/暖…)
+/// sit at the two ends of the track.
 ///
 /// The drag is attached simultaneously and locks to the horizontal axis on its
 /// first movement, so vertical scrolls through a sheet still work.
@@ -16,6 +17,8 @@ struct FilmSlider: View {
     var leadingLabel: String? = nil
     var trailingLabel: String? = nil
     var format: (Double) -> String = FilmSlider.signed
+    /// Called with true when a drag starts and false when it ends.
+    var onEditingChanged: (Bool) -> Void = { _ in }
 
     @State private var isDragging = false
     @State private var startValue: Double = 0
@@ -26,36 +29,42 @@ struct FilmSlider: View {
     private var isAtDefault: Bool { abs(value - defaultValue) < span * 0.002 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
-                    .font(AppFont.ui(14, .medium))
+                    .font(AppFont.ui(15, .medium))
                     .foregroundStyle(Theme.text)
                 Spacer()
                 Text(format(value))
                     .font(AppFont.mono(12))
                     .monospacedDigit()
-                    .foregroundStyle(isAtDefault ? Theme.secondary : Theme.accent)
+                    .foregroundStyle(isAtDefault ? Theme.secondary : Theme.text)
                     .animation(Motion.fade, value: isAtDefault)
             }
-            track
-                .frame(height: 26)
-            if leadingLabel != nil || trailingLabel != nil {
-                HStack {
-                    Text(leadingLabel ?? "")
-                    Spacer()
-                    Text(trailingLabel ?? "")
+            HStack(spacing: 10) {
+                if let leadingLabel {
+                    Text(leadingLabel)
+                        .font(AppFont.ui(11))
+                        .foregroundStyle(Theme.tertiary)
+                        .fixedSize()
                 }
-                .font(AppFont.ui(11))
-                .foregroundStyle(Theme.tertiary)
-                .padding(.top, -4)
+                track
+                    .frame(height: 26)
+                if let trailingLabel {
+                    Text(trailingLabel)
+                        .font(AppFont.ui(11))
+                        .foregroundStyle(Theme.tertiary)
+                        .fixedSize()
+                }
             }
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             guard !isAtDefault else { return }
             Haptics.softTap()
+            onEditingChanged(true)
             withAnimation(Motion.standard) { value = defaultValue }
+            onEditingChanged(false)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(title))
@@ -105,7 +114,7 @@ struct FilmSlider: View {
                         .fixedSize()
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Capsule().fill(Theme.accent))
+                        .background(Capsule().fill(Theme.text))
                         .frame(width: 64)
                         .offset(x: thumbX - 32, y: -26)
                         .transition(.scale(scale: 0.6, anchor: .bottom).combined(with: .opacity))
@@ -127,7 +136,7 @@ struct FilmSlider: View {
                     if horizontal {
                         startValue = value
                         inDetent = isAtDefault
-                        Haptics.softTap(0.4)
+                        onEditingChanged(true)
                         withAnimation(Motion.snappy) { isDragging = true }
                     }
                 }
@@ -148,6 +157,7 @@ struct FilmSlider: View {
                 lockedAxis = nil
                 if isDragging {
                     withAnimation(Motion.snappy) { isDragging = false }
+                    onEditingChanged(false)
                 }
             }
     }
@@ -162,13 +172,14 @@ struct FilmSlider: View {
     }
 
     nonisolated static func times(_ v: Double) -> String {
-        v < 0.005 ? "关" : String(format: "%.2f×", v)
+        v < 0.005 ? "关" : String(format: "%.1f×", v)
     }
 }
 
 // MARK: - Segmented
 
-/// A capsule segmented control whose selection pill slides with a spring.
+/// A segmented control whose selection pill slides with a spring. The pill is
+/// a neutral light fill (amber is kept for "on" states and primary actions).
 struct PillSegmented<Option: Hashable>: View {
     let options: [Option]
     @Binding var selection: Option
@@ -191,17 +202,17 @@ struct PillSegmented<Option: Hashable>: View {
                             .font(AppFont.ui(13, .semibold))
                         if let subtitle {
                             Text(subtitle(option))
-                                .font(AppFont.ui(10))
-                                .opacity(0.75)
+                                .font(AppFont.ui(11))
+                                .opacity(0.8)
                         }
                     }
-                    .foregroundStyle(selected ? Theme.background : Theme.text)
+                    .foregroundStyle(selected ? Theme.text : Theme.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, subtitle == nil ? 7 : 6)
                     .background {
                         if selected {
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Theme.accent)
+                                .fill(Color.white.opacity(0.14))
                                 .matchedGeometryEffect(id: "pill", in: namespace)
                         }
                     }
@@ -211,7 +222,7 @@ struct PillSegmented<Option: Hashable>: View {
             }
         }
         .padding(3)
-        .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.white.opacity(0.06)))
+        .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.white.opacity(0.05)))
         .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
     }
 }
@@ -233,8 +244,8 @@ struct SettingToggle: View {
             HStack(spacing: 12) {
                 if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Theme.accent)
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(Theme.secondary)
                         .frame(width: 22)
                 }
                 VStack(alignment: .leading, spacing: 2) {
@@ -245,6 +256,7 @@ struct SettingToggle: View {
                         Text(subtitle)
                             .font(AppFont.ui(12))
                             .foregroundStyle(Theme.secondary)
+                            .lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -254,18 +266,30 @@ struct SettingToggle: View {
     }
 }
 
+/// A thin divider; `inset` lines it up with row text after an icon.
+struct RowDivider: View {
+    var inset: CGFloat = 0
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.hairline)
+            .frame(height: 1)
+            .padding(.leading, inset)
+    }
+}
+
 /// A titled group of controls on a surface card.
 struct ControlSection<Content: View>: View {
     let title: String
     var trailing: String? = nil
+    var spacing: CGFloat = 16
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(title)
-                    .font(AppFont.ui(12, .semibold))
-                    .tracking(1)
+                    .font(AppFont.ui(13, .medium))
                     .foregroundStyle(Theme.secondary)
                 Spacer()
                 if let trailing {
@@ -275,10 +299,10 @@ struct ControlSection<Content: View>: View {
                 }
             }
             .padding(.horizontal, 4)
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: spacing) {
                 content()
             }
-            .padding(16)
+            .padding(14)
             .surfaceCard(radius: 18)
         }
     }
@@ -309,13 +333,14 @@ extension View {
 /// `model.banner` as a capsule toast that springs in from the top.
 struct BannerOverlay: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var topPadding: CGFloat = 8
 
     var body: some View {
         VStack {
             if let text = model.banner {
                 Text(text)
-                    .font(AppFont.ui(14, .medium))
+                    .font(AppFont.ui(13, .medium))
                     .foregroundStyle(Theme.text)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 18)
@@ -325,13 +350,20 @@ struct BannerOverlay: View {
                     .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
                     .padding(.horizontal, 24)
                     .id(text)
-                    .transition(.move(edge: .top).combined(with: .opacity).combined(with: .scale(scale: 0.92, anchor: .top)))
+                    .transition(bannerTransition)
             }
             Spacer(minLength: 0)
         }
         .padding(.top, topPadding)
         .frame(maxWidth: .infinity)
         .allowsHitTesting(false)
-        .animation(Motion.bouncy, value: model.banner)
+        .animation(Motion.pick(Motion.bouncy, reduceMotion: reduceMotion), value: model.banner)
+    }
+
+    private var bannerTransition: AnyTransition {
+        if reduceMotion { return AnyTransition.opacity }
+        return AnyTransition.move(edge: .top)
+            .combined(with: .opacity)
+            .combined(with: .scale(scale: 0.92, anchor: .top))
     }
 }

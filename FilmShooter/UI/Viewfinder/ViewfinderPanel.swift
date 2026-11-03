@@ -13,7 +13,7 @@ final class ShutterFX {
     func fire() {
         Haptics.filmAdvance()
         task?.cancel()
-        withAnimation(.easeIn(duration: 0.07)) { blackout = 1 }
+        withAnimation(.easeIn(duration: 0.07)) { blackout = 0.85 }
         task = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 120_000_000)
             guard let self, !Task.isCancelled else { return }
@@ -26,9 +26,10 @@ final class ShutterFX {
 
 /// The viewfinder: a 3:4 Metal view that is created once and never resized,
 /// masked to the chosen frame (the mask morphs with a spring when the aspect
-/// changes), with focus/exposure, pinch zoom, lens chips, film swipe, grid,
-/// the date-back LCD and the shutter blackout layered on top. Fast-changing
-/// state (zoom, exposure, blackout, film title) lives in small subviews.
+/// changes), with focus/exposure, pinch zoom, lens chips and zoom dial, film
+/// swipe, grid, the date-back LCD and the shutter blackout layered on top.
+/// Fast-changing state (zoom, exposure, blackout, film title) lives in small
+/// subviews.
 struct ViewfinderPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -46,8 +47,13 @@ struct ViewfinderPanel: View {
     @State private var isAdjustingEV = false
     @State private var pinching = false
     @State private var pinchSeen = false
+    @State private var swipeAnnounce = 0
+    @State private var swipeDirection: CGFloat = 1
+    /// The native-style 3D turn when the camera flips (degrees about y).
+    @State private var turn: Double = 0
+    @State private var turnTask: Task<Void, Never>?
 
-    private let corner: CGFloat = 6
+    private let corner: CGFloat = 10
 
     var body: some View {
         GeometryReader { geo in
@@ -56,11 +62,14 @@ struct ViewfinderPanel: View {
             ZStack {
                 layers(container: container, mask: mask)
                     .frame(width: mask.width, height: mask.height)
+                    .rotation3DEffect(.degrees(turn), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .animation(Motion.pick(Motion.gentle, reduceMotion: reduceMotion), value: model.settings.frameAspect)
         .onChange(of: model.settings.frameAspect) { _, _ in hideReticle(animated: false) }
+        .onChange(of: model.camera.isSwitching) { _, switching in switchingChanged(switching) }
+        .onChange(of: model.camera.position) { _, _ in positionChanged() }
     }
 
     @ViewBuilder
@@ -91,22 +100,59 @@ struct ViewfinderPanel: View {
 
             focusLayer(mask: mask)
 
-            FilmSwitchTitle()
+            FilmSwitchTitle(trigger: swipeAnnounce, direction: swipeDirection)
 
             ViewfinderLCD()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(9)
+                .padding(10)
+                .allowsHitTesting(false)
+
+            DateBackPreview()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .padding(.trailing, 12)
+                .padding(.bottom, 60)
                 .allowsHitTesting(false)
 
             LensControl(isPinching: pinching)
                 .frame(maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 12)
-
-            shape
-                .strokeBorder(Theme.hairlineStrong, lineWidth: 1)
-                .allowsHitTesting(false)
+                .padding(.bottom, 6)
         }
         .animation(Motion.fade, value: model.settings.showGrid)
+    }
+
+    // MARK: flip turn
+
+    private func switchingChanged(_ switching: Bool) {
+        guard !reduceMotion else { return }
+        if switching {
+            turnTask?.cancel()
+            withAnimation(.easeIn(duration: 0.16)) { turn = 90 }
+        } else {
+            // Finished without the camera changing sides (e.g. a failure):
+            // turn back the way we came.
+            Task {
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                if turn == 90 {
+                    withAnimation(.easeOut(duration: 0.22)) { turn = 0 }
+                }
+            }
+        }
+    }
+
+    private func positionChanged() {
+        guard !reduceMotion, turn != 0 else { return }
+        turnTask?.cancel()
+        turnTask = Task {
+            // Let the first half finish (edge-on, hidden under the veil).
+            try? await Task.sleep(nanoseconds: 160_000_000)
+            guard !Task.isCancelled else { return }
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { turn = -90 }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.22)) { turn = 0 }
+        }
     }
 
     // MARK: gestures
@@ -163,8 +209,11 @@ struct ViewfinderPanel: View {
                     let predicted = g.predictedEndTranslation.width
                     let decisive = abs(dx) > 44 ? dx : predicted
                     if abs(dx) > 44 || abs(predicted) > 110 {
+                        let step = decisive < 0 ? 1 : -1
                         Haptics.selection()
-                        model.selectAdjacentFilm(decisive < 0 ? 1 : -1)
+                        model.selectAdjacentFilm(step)
+                        swipeDirection = step > 0 ? 1 : -1
+                        swipeAnnounce += 1
                     }
                 case .exposure:
                     isAdjustingEV = false
@@ -274,7 +323,7 @@ struct BlackoutLayer: View {
     }
 }
 
-/// A frosted veil while the camera switches lenses / sides (only exists while
+/// A frosted veil while the camera switches sides (only exists while
 /// switching, so there is no permanent backdrop blur over the live picture).
 struct SwitchingOverlay: View {
     @Environment(AppModel.self) private var model
@@ -289,7 +338,7 @@ struct SwitchingOverlay: View {
                     .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.22), value: switching)
+        .animation(.easeInOut(duration: 0.18), value: switching)
         .allowsHitTesting(false)
     }
 }
@@ -434,49 +483,72 @@ struct ExposureScale: View {
     }
 }
 
-// MARK: - Lens chips
+// MARK: - Lens chips & zoom dial
 
-/// Native-style lens chips: small dark discs with ".5", "1×", "2"...; the
-/// active one is larger and shows the live zoom in amber. During a pinch a
-/// large zoom readout floats above them. Reads the ~30 Hz zoom, so it is its
-/// own small view.
+/// Native-style lens chips in a small frosted capsule: dark discs with ".5",
+/// "1×", "2"…; the active one is larger and shows the live zoom in amber.
+/// Each chip has a 44 pt hit area. Dragging sideways on the row turns it into
+/// a zoom dial (log scale, sticking at each lens with a haptic). During a
+/// pinch or a dial drag a "2.0× · 48 mm" readout floats above. Reads the
+/// ~30 Hz zoom, so it is its own small view.
 struct LensControl: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let isPinching: Bool
 
     @State private var showReadout = false
     @State private var readoutTask: Task<Void, Never>?
+    @State private var dialStart: CGFloat?
+    @State private var showDial = false
+    @State private var detent: CGFloat?
+    @State private var dialTask: Task<Void, Never>?
+
+    /// Points per stop (doubling of the zoom) on the dial.
+    static let pointsPerStop: CGFloat = 110
 
     var body: some View {
         let camera = model.camera
         let zoom = camera.zoomDisplayFactor
         let active = camera.activeLens
-        let readout = Self.zoomText(zoom)
-        VStack(spacing: 10) {
-            if showReadout {
+        let readout = Self.readoutText(zoom: zoom, front: camera.position == .front)
+        VStack(spacing: 8) {
+            if showReadout || showDial {
                 Text(readout)
-                    .font(AppFont.ui(17, .semibold))
+                    .font(AppFont.mono(15, .semibold))
                     .monospacedDigit()
                     .foregroundStyle(Theme.accent)
                     .contentTransition(.numericText(value: Double(zoom)))
                     .animation(.spring(response: 0.2, dampingFraction: 0.9), value: readout)
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
+                    .padding(.vertical, 6)
                     .background(Capsule().fill(Color.black.opacity(0.5)))
-                    .transition(.opacity.combined(with: .scale(scale: 0.88)))
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
                     .allowsHitTesting(false)
             }
             if !camera.lenses.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(camera.lenses) { lens in
-                        chip(lens, camera: camera, selected: lens.id == active?.id, zoom: zoom)
+                ZStack {
+                    HStack(spacing: 0) {
+                        ForEach(camera.lenses) { lens in
+                            chip(lens, camera: camera, selected: lens.id == active?.id, zoom: zoom)
+                        }
+                    }
+                    .opacity(showDial ? 0 : 1)
+                    if showDial {
+                        ZoomDial(zoom: zoom,
+                                 lensFactors: camera.lenses.map(\.displayFactor),
+                                 range: camera.zoomRange)
+                            .transition(.opacity)
                     }
                 }
-                .padding(4)
-                .background(Capsule().fill(Color.black.opacity(0.24)))
+                .padding(.horizontal, 2)
+                .frame(height: 46)
+                .background(Capsule().fill(.ultraThinMaterial))
+                .contentShape(Capsule())
+                .highPriorityGesture(dialGesture)
                 .animation(Motion.snappy, value: active?.id)
             }
         }
+        .animation(Motion.pick(Motion.snappy, reduceMotion: reduceMotion), value: showDial)
         .animation(.easeOut(duration: 0.2), value: showReadout)
         .onChange(of: isPinching) { _, pinching in
             readoutTask?.cancel()
@@ -494,148 +566,260 @@ struct LensControl: View {
 
     private func chip(_ lens: CameraService.Lens, camera: CameraService, selected: Bool, zoom: CGFloat) -> some View {
         let label = camera.lensChipLabel(for: lens)
-        return Button {
-            Haptics.tap()
-            camera.setZoom(displayFactor: lens.displayFactor, animated: true)
-        } label: {
-            Text(label)
-                .font(AppFont.ui(selected ? 12.5 : 11, .semibold))
-                .monospacedDigit()
-                .foregroundStyle(selected ? Theme.accent : Theme.text.opacity(0.92))
-                .contentTransition(.numericText(value: Double(selected ? zoom : lens.displayFactor)))
-                .animation(.spring(response: 0.2, dampingFraction: 0.9), value: label)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .uprightWithDevice()
-                .frame(width: selected ? 38 : 28, height: selected ? 38 : 28)
-                .background(Circle().fill(Color.black.opacity(selected ? 0.55 : 0.4)))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.pressable(scale: 0.9))
-        .accessibilityLabel(Text("\(Self.zoomText(lens.displayFactor)) 镜头"))
+        return Text(label)
+            .font(AppFont.ui(selected ? 13 : 11, .semibold))
+            .monospacedDigit()
+            .foregroundStyle(selected ? Theme.accent : Theme.text.opacity(0.92))
+            .contentTransition(.numericText(value: Double(selected ? zoom : lens.displayFactor)))
+            .animation(.spring(response: 0.2, dampingFraction: 0.9), value: label)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .uprightWithDevice()
+            .frame(width: selected ? 38 : 28, height: selected ? 38 : 28)
+            .background(Circle().fill(Color.black.opacity(selected ? 0.5 : 0.35)))
+            .frame(width: 44, height: 44)
+            .contentShape(Circle())
+            .onTapGesture {
+                Haptics.tap()
+                camera.setZoom(displayFactor: lens.displayFactor, animated: true)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("\(Self.zoomText(lens.displayFactor)) 镜头"))
+            .accessibilityAddTraits(.isButton)
     }
 
-    static func zoomText(_ zoom: CGFloat) -> String {
+    private var dialGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { g in
+                let camera = model.camera
+                if dialStart == nil {
+                    dialStart = camera.zoomDisplayFactor
+                    dialTask?.cancel()
+                    withAnimation(Motion.snappy) { showDial = true }
+                    Haptics.softTap(0.5)
+                }
+                let start = dialStart ?? 1
+                let range = camera.zoomRange
+                var raw = start * pow(2, -g.translation.width / Self.pointsPerStop)
+                raw = min(max(raw, range.lowerBound), range.upperBound)
+                let hit = camera.lenses.map(\.displayFactor).first { abs(log2($0) - log2(raw)) < 0.03 }
+                camera.setZoom(displayFactor: hit ?? raw, animated: false)
+                if hit != detent {
+                    detent = hit
+                    if hit != nil { Haptics.selection() }
+                }
+            }
+            .onEnded { _ in
+                dialStart = nil
+                detent = nil
+                dialTask?.cancel()
+                dialTask = Task {
+                    try? await Task.sleep(nanoseconds: 1_400_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(Motion.standard) { showDial = false }
+                }
+            }
+    }
+
+    /// "2×", "2.4×", "0.5×".
+    nonisolated static func zoomText(_ zoom: CGFloat) -> String {
         let r = (zoom * 10).rounded() / 10
         if r == r.rounded() { return "\(Int(r))×" }
         return String(format: "%.1f×", Double(r))
+    }
+
+    /// "2.0× · 48 mm" (back camera: 24 mm main lens × zoom); front: "1.0×".
+    nonisolated static func readoutText(zoom: CGFloat, front: Bool) -> String {
+        let z = String(format: "%.1f×", Double(zoom))
+        if front { return z }
+        return "\(z) · \(Int((24 * zoom).rounded())) mm"
+    }
+}
+
+/// A tick ruler on a log scale: minor ticks every 0.1 stop, a labelled major
+/// tick at each lens, an amber needle at the current zoom; both ends fade.
+struct ZoomDial: View {
+    let zoom: CGFloat
+    let lensFactors: [CGFloat]
+    let range: ClosedRange<CGFloat>
+
+    var body: some View {
+        let zoom = self.zoom
+        let factors = lensFactors
+        let labels = lensFactors.map { LensControl.zoomText($0) }
+        let pps = LensControl.pointsPerStop
+        let lo = log2(max(range.lowerBound, 0.01))
+        let hi = log2(max(range.upperBound, 0.01))
+        Canvas { context, size in
+            let cx = size.width / 2
+            let current = log2(max(zoom, 0.01))
+            let tickTop = size.height * 0.6
+            var s = (lo * 10).rounded(.down) / 10
+            while s <= hi + 0.001 {
+                let x = cx + (s - current) * pps
+                if x >= -2 && x <= size.width + 2 {
+                    var p = Path()
+                    p.move(to: CGPoint(x: x, y: tickTop))
+                    p.addLine(to: CGPoint(x: x, y: tickTop + 6))
+                    context.stroke(p, with: .color(Color.white.opacity(0.4)), lineWidth: 1)
+                }
+                s += 0.1
+            }
+            for (i, f) in factors.enumerated() {
+                let x = cx + (log2(max(f, 0.01)) - current) * pps
+                guard x >= -24 && x <= size.width + 24 else { continue }
+                var p = Path()
+                p.move(to: CGPoint(x: x, y: tickTop - 3))
+                p.addLine(to: CGPoint(x: x, y: tickTop + 9))
+                context.stroke(p, with: .color(Color.white.opacity(0.9)), lineWidth: 1.5)
+                context.draw(Text(labels[i])
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.9)),
+                             at: CGPoint(x: x, y: size.height * 0.3))
+            }
+            var needle = Path()
+            needle.move(to: CGPoint(x: cx, y: size.height * 0.48))
+            needle.addLine(to: CGPoint(x: cx, y: size.height - 5))
+            context.stroke(needle, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+        }
+        .frame(width: 236, height: 46)
+        .mask {
+            LinearGradient(stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .black, location: 0.18),
+                .init(color: .black, location: 0.82),
+                .init(color: .clear, location: 1),
+            ], startPoint: .leading, endPoint: .trailing)
+        }
+        .allowsHitTesting(false)
     }
 }
 
 // MARK: - LCD
 
-/// The date-back readout in the viewfinder corner: film, ISO, exposure
-/// compensation, and a pulsing dot while the film's table is baking.
+/// The date-back readout in the viewfinder corner: a pulsing dot while the
+/// film's table is baking, and the exposure compensation when it isn't zero.
+/// Nothing at all otherwise.
 struct ViewfinderLCD: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let film = model.film
         let bias = model.camera.exposureBias
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 5) {
-                Text("\(film.name.uppercased()) · ISO \(film.iso)")
-                    .lcdText(10)
-                if model.isBakingLUT {
-                    Circle()
-                        .fill(Theme.lcd)
-                        .frame(width: 5, height: 5)
-                        .phaseAnimator([0.25, 1.0]) { content, phase in
-                            content.opacity(phase)
-                        } animation: { _ in
-                            .easeInOut(duration: 0.55)
-                        }
-                        .transition(.opacity)
+        let baking = model.isBakingLUT
+        let showsEV = abs(bias) >= 0.05
+        ZStack(alignment: .topLeading) {
+            if baking || showsEV {
+                HStack(spacing: 6) {
+                    if baking {
+                        Circle()
+                            .fill(Theme.lcd)
+                            .frame(width: 5, height: 5)
+                            .phaseAnimator([0.25, 1.0]) { content, phase in
+                                content.opacity(phase)
+                            } animation: { _ in
+                                .easeInOut(duration: 0.55)
+                            }
+                    }
+                    if showsEV {
+                        Text(String(format: "EV %+.1f", bias))
+                            .lcdText(11)
+                    }
                 }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.black.opacity(0.32)))
+                .transition(.opacity)
             }
-            if abs(bias) >= 0.05 {
-                Text(String(format: "EV %+.1f", bias))
-                    .lcdText(10)
+        }
+        .animation(Motion.fade, value: baking)
+        .animation(Motion.fade, value: showsEV)
+    }
+}
+
+/// A preview of the date the print will carry (only when 日期印 is on).
+struct DateBackPreview: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let on = model.recipe.dateStamp
+        ZStack {
+            if on {
+                Text(DevelopRecipe.dateText(Date()))
+                    .lcdText(13)
                     .transition(.opacity)
             }
         }
-        .lineLimit(1)
-        .minimumScaleFactor(0.6)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.black.opacity(0.32)))
-        .animation(Motion.fade, value: model.isBakingLUT)
-        .animation(Motion.fade, value: abs(bias) >= 0.05)
+        .animation(Motion.fade, value: on)
     }
 }
 
 // MARK: - Film switch title
 
-/// When the film changes, its name rises over the middle of the viewfinder --
-/// brand in tracked small caps, the name large, ISO and process -- and fades
-/// after ~0.9 s.
+/// After a swipe on the viewfinder, the new film's name rises in the lower
+/// third -- brand in tracked small caps, the name, its tagline, ISO and
+/// process -- and fades after ~0.9 s. Only for swipes: the title row above
+/// the carousel already names the film otherwise.
 struct FilmSwitchTitle: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let trigger: Int
+    let direction: CGFloat
 
     @State private var shown: FilmStock?
-    @State private var direction: CGFloat = 1
     @State private var hideTask: Task<Void, Never>?
 
     var body: some View {
-        let id = model.recipe.filmID
         ZStack {
             if let film = shown {
-                VStack(spacing: 6) {
+                VStack(spacing: 5) {
                     Text(film.brand.uppercased())
-                        .font(AppFont.ui(12, .semibold))
+                        .font(AppFont.ui(10, .semibold))
                         .tracking(4)
-                        .foregroundStyle(Color.white.opacity(0.78))
+                        .foregroundStyle(Color.white.opacity(0.8))
                     Text(film.name)
-                        .font(AppFont.ui(34, .semibold))
+                        .font(AppFont.ui(28, .semibold))
                         .foregroundStyle(Color.white)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.45)
+                        .minimumScaleFactor(0.5)
+                    Text(film.tagline)
+                        .font(AppFont.ui(13))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     HStack(spacing: 8) {
                         Text("ISO \(film.iso)")
-                            .font(AppFont.mono(12, .semibold))
-                            .foregroundStyle(Theme.accent)
+                            .font(AppFont.mono(11, .semibold))
                         Text(film.kind.shortTitle)
                             .font(AppFont.mono(10, .semibold))
-                            .foregroundStyle(Color.white.opacity(0.9))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .overlay(Capsule().strokeBorder(Color.white.opacity(0.5), lineWidth: 0.8))
-                        Text(film.kind.title)
-                            .font(AppFont.ui(11, .medium))
-                            .foregroundStyle(Color.white.opacity(0.75))
                     }
+                    .foregroundStyle(Color.white.opacity(0.85))
+                    .padding(.top, 2)
                 }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 26)
-                .background(
-                    RadialGradient(colors: [Color.black.opacity(0.5), Color.black.opacity(0)],
-                                   center: .center, startRadius: 0, endRadius: 170)
-                )
+                .shadow(color: .black.opacity(0.5), radius: 10)
+                .padding(.horizontal, 20)
                 .id(film.id)
                 .transition(transition)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .padding(.bottom, 70)
         .allowsHitTesting(false)
-        .onChange(of: id) { old, new in present(old: old, new: new) }
+        .onChange(of: trigger) { _, _ in present() }
     }
 
     private var transition: AnyTransition {
-        if reduceMotion { return .opacity }
-        return .asymmetric(
-            insertion: .opacity.combined(with: .offset(x: 28 * direction)).combined(with: .scale(scale: 0.96)),
-            removal: .opacity.combined(with: .offset(x: -20 * direction)))
+        if reduceMotion { return AnyTransition.opacity }
+        return AnyTransition.asymmetric(
+            insertion: AnyTransition.opacity.combined(with: .offset(x: 28 * direction)).combined(with: .scale(scale: 0.96)),
+            removal: AnyTransition.opacity.combined(with: .offset(x: -20 * direction)))
     }
 
-    private func present(old: String, new: String) {
-        let films = FilmCatalog.films
-        if let a = films.firstIndex(where: { $0.id == old }), let b = films.firstIndex(where: { $0.id == new }) {
-            var diff = b - a
-            if diff > films.count / 2 { diff -= films.count } else if diff < -films.count / 2 { diff += films.count }
-            direction = diff >= 0 ? 1 : -1
-        }
+    private func present() {
         hideTask?.cancel()
-        withAnimation(Motion.standard) { shown = FilmCatalog.film(new) }
+        withAnimation(Motion.standard) { shown = model.film }
         hideTask = Task {
             try? await Task.sleep(nanoseconds: 900_000_000)
             guard !Task.isCancelled else { return }

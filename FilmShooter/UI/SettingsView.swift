@@ -1,31 +1,39 @@
 import SwiftUI
 
+/// Routes inside the settings sheet.
+enum SettingsRoute: Hashable {
+    case about
+    case license(LicenseFile)
+}
+
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    @State private var showAbout = false
+    /// The navigation path. Initialised with About when asked to open there,
+    /// so the push is part of the first render -- no timing involved.
+    @State private var path: [SettingsRoute]
     @State private var confirmRewind = false
-    private let startAtAbout: Bool
 
     init(startAtAbout: Bool = false) {
-        self.startAtAbout = startAtAbout
+        _path = State(initialValue: startAtAbout ? [.about] : [])
     }
 
     var body: some View {
         @Bindable var settings = model.settings
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
-                VStack(spacing: 24) {
-                    ControlSection(title: "输出") {
-                        VStack(spacing: 14) {
-                            ForEach(OutputQuality.allCases) { quality in
-                                qualityRow(quality, selected: settings.outputQuality == quality) {
-                                    settings.outputQuality = quality
-                                }
+                VStack(spacing: 22) {
+                    ControlSection(title: "画质", spacing: 14) {
+                        ForEach(Array(OutputQuality.allCases.enumerated()), id: \.element.id) { index, quality in
+                            if index > 0 { RowDivider() }
+                            qualityRow(quality, selected: settings.outputQuality == quality) {
+                                settings.outputQuality = quality
                             }
                         }
-                        divider
+                    }
+
+                    ControlSection(title: "保存", spacing: 14) {
                         HStack {
                             Text("保存格式")
                                 .font(AppFont.ui(15, .medium))
@@ -35,29 +43,29 @@ struct SettingsView: View {
                                           title: { $0.title })
                                 .frame(width: 150)
                         }
-                        divider
+                        RowDivider()
                         SettingToggle(title: "自动存入相册", subtitle: "冲洗完成后自动保存到系统相册",
                                       systemImage: "photo.on.rectangle", isOn: $settings.autoSaveToPhotos)
-                        divider
+                        RowDivider(inset: 34)
                         SettingToggle(title: "保留原图", subtitle: "用于日后重新冲洗，会多占用一些空间",
                                       systemImage: "doc.on.doc", isOn: $settings.keepOriginals)
                     }
 
-                    ControlSection(title: "取景器") {
+                    ControlSection(title: "取景器", spacing: 14) {
                         SettingToggle(title: "取景网格", subtitle: "三分法构图线",
                                       systemImage: "square.grid.3x3", isOn: $settings.showGrid)
-                        divider
+                        RowDivider(inset: 34)
                         SettingToggle(title: "取景器颗粒预览", subtitle: "在取景器里模拟胶片颗粒",
                                       systemImage: "circle.dotted", isOn: $settings.viewfinderGrain)
                     }
 
-                    ControlSection(title: "胶卷") {
+                    ControlSection(title: "胶卷", spacing: 14) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("胶卷长度")
                                     .font(AppFont.ui(15, .medium))
                                     .foregroundStyle(Theme.text)
-                                Text("当前拍到第 \(model.frameNumber) 张")
+                                Text("当前拍到第 \(String(model.frameNumber)) 张")
                                     .font(AppFont.ui(12))
                                     .foregroundStyle(Theme.secondary)
                                     .contentTransition(.numericText(value: Double(model.frameNumber)))
@@ -67,15 +75,14 @@ struct SettingsView: View {
                                           title: { "\($0) 张" })
                                 .frame(width: 150)
                         }
-                        divider
+                        RowDivider()
                         Button {
-                            Haptics.tap()
                             confirmRewind = true
                         } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "arrow.counterclockwise.circle")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(Theme.accent)
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(Theme.secondary)
                                     .frame(width: 22)
                                 Text("重新装片")
                                     .font(AppFont.ui(15, .medium))
@@ -85,23 +92,21 @@ struct SettingsView: View {
                                     .font(AppFont.ui(12))
                                     .foregroundStyle(Theme.secondary)
                             }
+                            .frame(minHeight: 32)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.pressable(scale: 0.98))
                     }
 
-                    ControlSection(title: "通用") {
+                    ControlSection(title: "通用", spacing: 14) {
                         SettingToggle(title: "触感反馈", subtitle: "快门、过片和切换胶片时的振动",
                                       systemImage: "hand.tap", isOn: $settings.haptics)
-                        divider
-                        Button {
-                            Haptics.tap()
-                            showAbout = true
-                        } label: {
+                        RowDivider(inset: 34)
+                        NavigationLink(value: SettingsRoute.about) {
                             HStack(spacing: 12) {
                                 Image(systemName: "info.circle")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(Theme.accent)
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(Theme.secondary)
                                     .frame(width: 22)
                                 Text("关于胶片机")
                                     .font(AppFont.ui(15, .medium))
@@ -111,6 +116,7 @@ struct SettingsView: View {
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(Theme.tertiary)
                             }
+                            .frame(minHeight: 32)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.pressable(scale: 0.98))
@@ -126,10 +132,10 @@ struct SettingsView: View {
                 .padding(.bottom, 30)
             }
             .scrollIndicators(.hidden)
-            .background(Theme.background.ignoresSafeArea())
+            .background { SheetBackground() }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Theme.background, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -141,19 +147,24 @@ struct SettingsView: View {
                     }
                 }
             }
-            .navigationDestination(isPresented: $showAbout) {
-                AboutView()
+            .navigationDestination(for: SettingsRoute.self) { route in
+                switch route {
+                case .about:
+                    AboutView()
+                case .license(let file):
+                    LicenseTextView(file: file)
+                }
             }
         }
-        .task {
-            // Opened straight to About: push once the sheet has settled.
-            guard startAtAbout, !showAbout else { return }
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            showAbout = true
+        .onAppear {
+            ScreenshotMode.log("settings appeared, path \(path.count)")
+        }
+        .onChange(of: path) { old, new in
+            ScreenshotMode.log("settings path \(old.count) -> \(new.count)")
         }
         .tint(Theme.accent)
         .presentationDragIndicator(.visible)
-        .presentationBackground(Theme.background)
+        .presentationBackground(Color.clear)
         .presentationCornerRadius(28)
         .confirmationDialog("重新装片？", isPresented: $confirmRewind, titleVisibility: .visible) {
             Button("装上新胶卷") {
@@ -163,14 +174,8 @@ struct SettingsView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("计数器归零，从第 1 张开始拍一卷新的 \(model.settings.rollLength) 张胶卷。")
+            Text("计数器归零，从第 1 张开始拍一卷新的 \(String(model.settings.rollLength)) 张胶卷。")
         }
-    }
-
-    private var divider: some View {
-        Rectangle()
-            .fill(Theme.hairline)
-            .frame(height: 1)
     }
 
     private func qualityRow(_ quality: OutputQuality, selected: Bool, select: @escaping () -> Void) -> some View {
@@ -181,20 +186,17 @@ struct SettingsView: View {
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text("画质 · \(quality.title)")
+                    HStack(spacing: 0) {
+                        Text(quality.title)
                             .font(AppFont.ui(15, .medium))
                             .foregroundStyle(Theme.text)
                         if quality == OutputQuality.recommended {
-                            Text("推荐")
-                                .font(AppFont.ui(10, .semibold))
-                                .foregroundStyle(Theme.accent)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 1)
-                                .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.5), lineWidth: 0.8))
+                            Text("（推荐）")
+                                .font(AppFont.ui(15))
+                                .foregroundStyle(Theme.secondary)
                         }
                     }
-                    Text("\(quality.detail) · 长边 \(quality.longEdge) 像素")
+                    Text("\(quality.detail) · 长边 \(String(quality.longEdge)) 像素")
                         .font(AppFont.ui(12))
                         .foregroundStyle(Theme.secondary)
                 }

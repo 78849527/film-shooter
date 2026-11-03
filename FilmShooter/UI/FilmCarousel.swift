@@ -2,23 +2,25 @@ import SwiftUI
 
 // MARK: - Carousel
 
-/// A snapping, horizontally scrolling row of film canisters. The centred card
-/// is full size; the others shrink, fade and turn slightly away, computed per
-/// frame from each card's distance to the centre (pure transforms: no layout,
-/// no offscreen passes, so it holds 60/120 fps).
+/// A snapping, horizontally scrolling row of film canisters. The centred roll
+/// is full size; the others shrink and fade with their distance from the
+/// centre (pure transforms: no layout, no offscreen passes, so it holds
+/// 60/120 fps). A small amber notch marks the centre.
 struct FilmCarousel: View {
     enum Style: Equatable {
         case hero, compact
 
-        var cardHeight: CGFloat { self == .hero ? 72 : 46 }
-        var gap: CGFloat { self == .hero ? 12 : 8 }
-        var shrink: CGFloat { self == .hero ? 0.27 : 0.2 }
-        var height: CGFloat { cardHeight + (self == .hero ? 16 : 12) }
+        var cardHeight: CGFloat { self == .hero ? 60 : 44 }
+        var gap: CGFloat { 6 }
+        var shrink: CGFloat { self == .hero ? 0.24 : 0.2 }
+        var height: CGFloat { cardHeight + 14 }
     }
 
     let style: Style
     @Binding var centeredID: String?
     let onTap: (String) -> Void
+    /// The scroll came to rest.
+    let onSettle: () -> Void
 
     var body: some View {
         GeometryReader { geo in
@@ -26,45 +28,64 @@ struct FilmCarousel: View {
             let cardWidth = FilmCanister.width(forHeight: style.cardHeight)
             let step = cardWidth + style.gap
             let shrink = style.shrink
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: style.gap) {
-                    ForEach(FilmCatalog.films) { film in
-                        card(film, width: cardWidth)
-                            .visualEffect { content, proxy in
-                                // Distance from the visible centre, measured in the
-                                // card's own space against the scroll view's visible
-                                // bounds: independent of content margins.
-                                let visible = proxy.bounds(of: .scrollView(axis: .horizontal))
-                                    ?? CGRect(x: 0, y: 0, width: viewport, height: 0)
-                                let d = (proxy.size.width / 2 - visible.midX) / step
-                                let t = abs(d)
-                                let k = min(t, 1)
-                                let scale = 1 - shrink * k
-                                // Pull scaled cards in so the gaps stay even.
-                                let h = t < 1 ? t * t / 2 : t - 0.5
-                                let dx: CGFloat = (d < 0 ? 1 : -1) * cardWidth * shrink * h
-                                let fade = 1 - 0.3 * k - 0.32 * min(max(t - 1, 0), 1)
-                                let tilt = Double(max(-1, min(1, d))) * -16
-                                return content
-                                    .scaleEffect(scale)
-                                    .offset(x: dx)
-                                    .rotation3DEffect(.degrees(tilt), axis: (x: 0, y: 1, z: 0))
-                                    .opacity(Double(fade))
-                            }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: style.gap) {
+                        ForEach(FilmCatalog.films) { film in
+                            card(film, width: cardWidth)
+                                .id(film.id)
+                                .visualEffect { content, proxy in
+                                    // Distance from the visible centre, measured in the
+                                    // card's own space against the scroll view's visible
+                                    // bounds: independent of content margins.
+                                    let visible = proxy.bounds(of: .scrollView(axis: .horizontal))
+                                        ?? CGRect(x: 0, y: 0, width: viewport, height: 0)
+                                    let d = (proxy.size.width / 2 - visible.midX) / step
+                                    let t = abs(d)
+                                    let k = min(t, 1)
+                                    let scale = 1 - shrink * k
+                                    // Pull scaled cards in so the gaps stay even.
+                                    let h = t < 1 ? t * t / 2 : t - 0.5
+                                    let dx: CGFloat = (d < 0 ? 1 : -1) * cardWidth * shrink * h
+                                    let fade = 1 - 0.25 * k - 0.35 * min(max(t - 1, 0), 1)
+                                    return content
+                                        .scaleEffect(scale)
+                                        .offset(x: dx)
+                                        .opacity(Double(fade))
+                                }
+                        }
                     }
+                    .scrollTargetLayout()
                 }
-                .scrollTargetLayout()
+                .scrollIndicators(.hidden)
+                .contentMargins(.horizontal, max(0, (viewport - cardWidth) / 2), for: .scrollContent)
+                .scrollTargetBehavior(.viewAligned(limitBehavior: .never))
+                .scrollPosition(id: $centeredID, anchor: .center)
+                .onScrollPhaseChange { _, phase in
+                    if phase == .idle { onSettle() }
+                }
+                .onAppear {
+                    if let id = centeredID { proxy.scrollTo(id, anchor: .center) }
+                }
+                .task {
+                    // Once more after the first layout pass, in case the
+                    // initial position was resolved against estimated sizes.
+                    try? await Task.sleep(nanoseconds: 60_000_000)
+                    if let id = centeredID { proxy.scrollTo(id, anchor: .center) }
+                }
             }
-            .scrollIndicators(.hidden)
-            .contentMargins(.horizontal, max(0, (viewport - cardWidth) / 2), for: .scrollContent)
-            .scrollTargetBehavior(.viewAligned)
-            .scrollPosition(id: $centeredID, anchor: .center)
         }
         .frame(height: style.height)
+        .overlay(alignment: .bottom) {
+            Capsule()
+                .fill(Theme.accent)
+                .frame(width: 14, height: 2)
+                .allowsHitTesting(false)
+        }
     }
 
     private func card(_ film: FilmStock, width: CGFloat) -> some View {
-        VStack(spacing: style == .hero ? 4 : 2) {
+        VStack(spacing: 2) {
             FilmCanister(film: film, height: style.cardHeight)
             CanisterShadow(width: width * 0.86)
         }
@@ -76,54 +97,77 @@ struct FilmCarousel: View {
 
 // MARK: - Picker (title + carousel + kind chips)
 
-/// The film chooser: the centred film's name and tagline cross-fading above
-/// the carousel, and kind chips below that jump to a group. The selection is
-/// committed (`onCommit`) once the scroll settles; outside changes to
-/// `committedID` (viewfinder swipe, film library) scroll the carousel along.
-struct FilmPicker<Accessory: View>: View {
+/// The film chooser: the centred film's name cross-fading above the carousel,
+/// and kind chips below that jump to a group (flanked by `leading` and, on
+/// the hero, `trailing`). The selection is committed (`onCommit`) only when
+/// the scroll comes to rest; outside changes to `committedID` (viewfinder
+/// swipe, film library) scroll the carousel along.
+struct FilmPicker<Leading: View, Trailing: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let style: FilmCarousel.Style
     let committedID: String
     let onCommit: (String) -> Void
     var onTapCentered: (() -> Void)?
-    @ViewBuilder var accessory: () -> Accessory
+    @ViewBuilder var leading: () -> Leading
+    @ViewBuilder var trailing: () -> Trailing
 
     @State private var centeredID: String?
     @State private var settleTask: Task<Void, Never>?
+    @State private var jumpTask: Task<Void, Never>?
     @State private var jumpTarget: String?
     @State private var jumpUntil = Date.distantPast
     @State private var armed = false
+    @State private var dimmed = false
     /// The last id this picker committed itself (its echo through
     /// `committedID` must not scroll the carousel).
     @State private var ownCommit: String?
 
     init(style: FilmCarousel.Style, committedID: String, onCommit: @escaping (String) -> Void,
-         onTapCentered: (() -> Void)? = nil, @ViewBuilder accessory: @escaping () -> Accessory) {
+         onTapCentered: (() -> Void)? = nil,
+         @ViewBuilder leading: @escaping () -> Leading,
+         @ViewBuilder trailing: @escaping () -> Trailing) {
         self.style = style
         self.committedID = committedID
         self.onCommit = onCommit
         self.onTapCentered = onTapCentered
-        self.accessory = accessory
+        self.leading = leading
+        self.trailing = trailing
         _centeredID = State(initialValue: committedID)
     }
 
     private var centeredFilm: FilmStock { FilmCatalog.film(centeredID ?? committedID) }
 
     var body: some View {
-        VStack(spacing: style == .hero ? 8 : 6) {
-            HStack(alignment: .center, spacing: 12) {
+        VStack(spacing: 6) {
+            if style == .hero {
                 FilmTitleBlock(film: centeredFilm, style: style)
-                Spacer(minLength: 4)
-                accessory()
+                    .padding(.horizontal, 20)
+            } else {
+                HStack(spacing: 12) {
+                    FilmTitleBlock(film: centeredFilm, style: style)
+                    Spacer(minLength: 4)
+                    trailing()
+                }
+                .padding(.horizontal, 20)
             }
-            .padding(.horizontal, 20)
 
-            FilmCarousel(style: style, centeredID: $centeredID, onTap: tapCard)
+            FilmCarousel(style: style, centeredID: $centeredID, onTap: tapCard, onSettle: settled)
+                .opacity(dimmed ? 0 : 1)
 
-            KindChips(current: centeredFilm.kind, compact: style == .compact) { kind in
-                if let first = FilmCatalog.films(of: kind).first, first.kind != centeredFilm.kind {
-                    jump(to: first.id, haptic: true, commit: true)
+            HStack(spacing: 10) {
+                leading()
+                KindChips(current: centeredFilm.kind, compact: style == .compact) { kind in
+                    if let first = FilmCatalog.films(of: kind).first, first.kind != centeredFilm.kind {
+                        jump(to: first.id, haptic: true, commit: true)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                if style == .hero {
+                    trailing()
                 }
             }
+            .padding(.horizontal, 16)
         }
         .onChange(of: centeredID) { _, new in centeredChanged(new) }
         .onChange(of: committedID) { _, new in
@@ -140,26 +184,51 @@ struct FilmPicker<Accessory: View>: View {
             armed = true
             if centeredID != committedID { jump(to: committedID, haptic: false, commit: false) }
         }
-        .onDisappear { settleTask?.cancel() }
+        .onDisappear {
+            settleTask?.cancel()
+            jumpTask?.cancel()
+        }
     }
 
     private func tapCard(_ id: String) {
         if id == centeredID {
-            Haptics.tap()
             onTapCentered?()
         } else {
             jump(to: id, haptic: true, commit: true)
         }
     }
 
+    /// Scroll to a film. Long jumps (more than four rolls) don't whip through
+    /// the row: the carousel dips out, moves, and fades back in.
     private func jump(to id: String, haptic: Bool, commit: Bool) {
         jumpTarget = id
         jumpUntil = Date().addingTimeInterval(0.7)
         if haptic { Haptics.selection() }
-        withAnimation(Motion.standard) { centeredID = id }
+        let films = FilmCatalog.films
+        let from = films.firstIndex { $0.id == centeredID } ?? 0
+        let to = films.firstIndex { $0.id == id } ?? 0
+        jumpTask?.cancel()
+        if abs(to - from) > 4 {
+            jumpTask = Task {
+                withAnimation(.easeOut(duration: 0.12)) { dimmed = true }
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled else {
+                    dimmed = false
+                    return
+                }
+                var still = Transaction()
+                still.disablesAnimations = true
+                withTransaction(still) { centeredID = id }
+                try? await Task.sleep(nanoseconds: 30_000_000)
+                withAnimation(.easeIn(duration: 0.18)) { dimmed = false }
+            }
+        } else {
+            withAnimation(Motion.pick(Motion.standard, reduceMotion: reduceMotion)) { centeredID = id }
+        }
         if commit { scheduleCommit(id) }
     }
 
+    /// A detent passed under the notch: tick like a dial (no commit yet).
     private func centeredChanged(_ new: String?) {
         guard armed, let new else { return }
         if Date() < jumpUntil {
@@ -168,7 +237,20 @@ struct FilmPicker<Accessory: View>: View {
             return
         }
         Haptics.selection()
-        scheduleCommit(new)
+    }
+
+    /// The scroll came to rest: commit whatever is under the notch.
+    private func settled() {
+        guard armed, Date() >= jumpUntil else { return }
+        settleTask?.cancel()
+        let commit = onCommit
+        let current = committedID
+        settleTask = Task {
+            try? await Task.sleep(nanoseconds: 60_000_000)
+            guard !Task.isCancelled, let id = centeredID, id != current else { return }
+            ownCommit = id
+            commit(id)
+        }
     }
 
     private func scheduleCommit(_ id: String) {
@@ -186,54 +268,44 @@ struct FilmPicker<Accessory: View>: View {
 
 // MARK: - Title
 
-/// Brand in tracked small caps, name, ISO and tagline; cross-fades per film.
+/// The centred film's name. Hero: two centred lines (brand · process, then
+/// name + ISO). Compact: the same, left-aligned.
 struct FilmTitleBlock: View {
     let film: FilmStock
     let style: FilmCarousel.Style
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            VStack(alignment: .leading, spacing: style == .hero ? 3 : 2) {
-                HStack(spacing: 6) {
-                    Text(film.brand.uppercased())
-                        .font(AppFont.ui(10, .semibold))
-                        .tracking(1.8)
-                        .foregroundStyle(Theme.secondary)
-                    Text(film.kind.shortTitle)
-                        .font(AppFont.mono(9, .semibold))
-                        .foregroundStyle(Theme.accent)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.45), lineWidth: 0.8))
-                }
+        let hero = style == .hero
+        ZStack {
+            VStack(alignment: hero ? .center : .leading, spacing: 3) {
+                Text("\(film.brand.uppercased())  ·  \(film.kind.shortTitle)")
+                    .font(AppFont.ui(10, .semibold))
+                    .tracking(2)
+                    .foregroundStyle(Theme.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(film.name)
-                        .font(AppFont.ui(style == .hero ? 20 : 16, .semibold))
+                        .font(AppFont.ui(hero ? 20 : 17, .semibold))
                         .foregroundStyle(Theme.text)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                     Text("ISO \(film.iso)")
                         .font(AppFont.mono(11, .medium))
-                        .foregroundStyle(Theme.accent.opacity(0.9))
-                }
-                if style == .hero {
-                    Text(film.tagline)
-                        .font(AppFont.ui(12))
                         .foregroundStyle(Theme.secondary)
-                        .lineLimit(1)
                 }
             }
             .id(film.id)
-            .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 5)),
+            .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 4)),
                                     removal: .opacity))
         }
-        .frame(maxWidth: .infinity, minHeight: style == .hero ? 58 : 38, alignment: .leading)
-        .animation(.easeOut(duration: 0.24), value: film.id)
+        .frame(maxWidth: .infinity, minHeight: 40, alignment: hero ? .center : .leading)
+        .animation(.easeOut(duration: 0.22), value: film.id)
     }
 }
 
 // MARK: - Kind chips
 
+/// 负片 / 电影 / 反转 / 黑白: short labels, always semibold (only the colour
+/// changes, so nothing shifts when the selection moves).
 struct KindChips: View {
     let current: FilmKind
     var compact: Bool = false
@@ -242,17 +314,17 @@ struct KindChips: View {
     @Namespace private var namespace
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: compact ? 6 : 4) {
             ForEach(FilmKind.allCases) { kind in
                 let selected = kind == current
                 Button {
                     onSelect(kind)
                 } label: {
-                    Text(kind.title)
-                        .font(AppFont.ui(compact ? 11.5 : 12.5, selected ? .semibold : .medium))
+                    Text(kind.chipTitle)
+                        .font(AppFont.ui(13, .semibold))
                         .foregroundStyle(selected ? Theme.text : Theme.secondary)
-                        .padding(.horizontal, compact ? 10 : 12)
-                        .padding(.vertical, compact ? 5 : 6)
+                        .padding(.horizontal, 10)
+                        .frame(height: 30)
                         .background {
                             if selected {
                                 Capsule()
@@ -261,9 +333,11 @@ struct KindChips: View {
                                     .matchedGeometryEffect(id: "kind", in: namespace)
                             }
                         }
-                        .contentShape(Capsule())
+                        .frame(minHeight: 34)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.pressable(scale: 0.94))
+                .accessibilityLabel(Text(kind.title))
             }
         }
         .animation(Motion.snappy, value: current)
@@ -272,7 +346,8 @@ struct KindChips: View {
 
 // MARK: - Camera film section
 
-/// The camera screen's film chooser, bound to `model.recipe.filmID`.
+/// The camera screen's film chooser, bound to `model.filmID` (which changes
+/// only with the film, not with print-slider ticks).
 struct CameraFilmSection: View {
     @Environment(AppModel.self) private var model
     let openPrint: () -> Void
@@ -280,32 +355,30 @@ struct CameraFilmSection: View {
 
     var body: some View {
         let model = self.model
-        FilmPicker(style: .hero, committedID: model.recipe.filmID,
+        FilmPicker(style: .hero, committedID: model.filmID,
                    onCommit: { model.selectFilm($0) },
                    onTapCentered: openLibrary) {
-            HStack(spacing: 8) {
-                Button(action: { Haptics.tap(); openLibrary() }) {
-                    RoundIcon(systemName: "square.grid.2x2", size: 38, iconSize: 14)
-                }
-                .buttonStyle(.pressable)
-                .accessibilityLabel(Text("胶片库"))
-
-                Button(action: { Haptics.tap(); openPrint() }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("冲印")
-                            .font(AppFont.ui(14, .semibold))
-                    }
-                    .foregroundStyle(Theme.text)
-                    .padding(.horizontal, 14)
-                    .frame(height: 38)
-                    .background(Capsule().fill(Theme.surface))
-                    .overlay(Capsule().strokeBorder(Theme.hairlineStrong, lineWidth: 1))
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.pressable)
+            Button(action: openLibrary) {
+                RoundIcon(systemName: "square.grid.2x2", size: 34, iconSize: 13)
             }
+            .buttonStyle(.pressable)
+            .accessibilityLabel(Text("胶片库"))
+        } trailing: {
+            Button(action: openPrint) {
+                HStack(spacing: 5) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("冲印")
+                        .font(AppFont.ui(13, .semibold))
+                }
+                .foregroundStyle(Theme.text)
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .background(Capsule().fill(Theme.surface))
+                .overlay(Capsule().strokeBorder(Theme.hairlineStrong, lineWidth: 1))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
         }
     }
 }

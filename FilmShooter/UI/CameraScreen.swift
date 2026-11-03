@@ -1,4 +1,28 @@
 import SwiftUI
+import AVKit
+
+// MARK: - Presentation requests
+
+/// Item-based presentations: everything a presented screen needs travels in
+/// the item, so it is read when the item is set -- never from side state the
+/// root body doesn't read (which SwiftUI may hand to the cover stale).
+struct GalleryRequest: Identifiable {
+    let id = UUID()
+    /// Open straight into this print.
+    var initialPhotoID: UUID?
+}
+
+struct SettingsRequest: Identifiable {
+    let id = UUID()
+    var startAtAbout: Bool = false
+}
+
+struct LibraryRequest: Identifiable {
+    let id = UUID()
+    var filter: FilmLibraryFilter = .all
+}
+
+// MARK: - Camera screen
 
 /// The root screen: top bar, viewfinder, film chooser, shutter deck. Holds only
 /// presentation state; everything that changes often is read by subviews.
@@ -7,61 +31,66 @@ struct CameraScreen: View {
     @Namespace private var namespace
 
     @State private var fx = ShutterFX()
-    @State private var showGallery = false
-    @State private var galleryOpensFirstPhoto = false
-    @State private var showSettings = false
-    @State private var settingsAtAbout = false
+    @State private var galleryRequest: GalleryRequest?
+    @State private var settingsRequest: SettingsRequest?
+    @State private var libraryRequest: LibraryRequest?
     @State private var showPrint = false
-    @State private var showLibrary = false
-    @State private var libraryFilter: FilmLibraryFilter = .all
     @State private var showAspect = false
     @State private var editor: EditorModel?
     @State private var permissionDismissed = false
     @State private var didOpenScene = false
 
+    /// The hardware shutter (Camera Control / volume buttons) only fires
+    /// while the camera screen itself is in front.
+    private var captureEventsEnabled: Bool {
+        galleryRequest == nil && settingsRequest == nil && libraryRequest == nil
+            && !showPrint && editor == nil && !showAspect
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             TopBar(showAspectPicker: $showAspect, openSettings: {
-                settingsAtAbout = false
-                showSettings = true
+                settingsRequest = SettingsRequest(startAtAbout: false)
             })
 
             ViewfinderPanel(fx: fx)
-                .padding(.horizontal, 10)
-                .padding(.top, 2)
+                .padding(.horizontal, 8)
                 .frame(maxHeight: .infinity)
 
             EngineStatusCard()
-                .padding(.top, 8)
 
             CameraFilmSection(openPrint: { showPrint = true }, openLibrary: openLibrary)
-                .padding(.top, 12)
+                .padding(.top, 10)
 
             ControlDeck(namespace: namespace, editor: $editor, openGallery: {
-                galleryOpensFirstPhoto = false
-                showGallery = true
+                galleryRequest = GalleryRequest(initialPhotoID: nil)
             })
-            .padding(.top, 8)
-            .padding(.bottom, 6)
+            .padding(.top, 4)
+            .padding(.bottom, 2)
         }
         .background(Theme.background.ignoresSafeArea())
         .overlay { aspectOverlay }
-        .overlay { BannerOverlay(topPadding: 58) }
+        .overlay { BannerOverlay(topPadding: 52) }
         .overlay { PermissionGate(dismissed: $permissionDismissed) }
+        .onCameraCaptureEvent(isEnabled: captureEventsEnabled) { event in
+            if event.phase == .ended {
+                Task { await model.shoot() }
+            }
+        }
         .sheet(isPresented: $showPrint) {
             PrintSettingsSheet()
                 .environment(model)
         }
-        .sheet(isPresented: $showLibrary) {
-            FilmLibrarySheet(initialFilter: libraryFilter)
+        .sheet(item: $libraryRequest) { request in
+            FilmLibrarySheet(initialFilter: request.filter)
                 .environment(model)
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsView(startAtAbout: settingsAtAbout)
+        .sheet(item: $settingsRequest) { request in
+            SettingsView(startAtAbout: request.startAtAbout)
                 .environment(model)
         }
-        .fullScreenCover(isPresented: $showGallery) {
-            GalleryView(opensFirstPhoto: galleryOpensFirstPhoto)
+        .fullScreenCover(item: $galleryRequest) { request in
+            GalleryView(initialPhotoID: request.initialPhotoID)
                 .navigationTransition(.zoom(sourceID: "gallery", in: namespace))
                 .environment(model)
         }
@@ -89,7 +118,7 @@ struct CameraScreen: View {
                     .onTapGesture { closeAspect() }
                     .transition(.opacity)
                 AspectPickerPanel(close: closeAspect)
-                    .padding(.top, 54)
+                    .padding(.top, 48)
                     .transition(.scale(scale: 0.94, anchor: .top).combined(with: .opacity))
             }
         }
@@ -102,8 +131,7 @@ struct CameraScreen: View {
     // MARK: actions
 
     private func openLibrary() {
-        libraryFilter = model.isFavorite(model.recipe.filmID) ? .favorites : .all
-        showLibrary = true
+        libraryRequest = LibraryRequest(filter: model.isFavorite(model.filmID) ? .favorites : .all)
     }
 
     /// The editor works the GPU hard; the hidden viewfinder should not compete.
@@ -131,10 +159,22 @@ struct CameraScreen: View {
         case "print":
             try? await Task.sleep(nanoseconds: 500_000_000)
             showPrint = true
-        case "gallery", "detail":
+        case "gallery":
             try? await Task.sleep(nanoseconds: 400_000_000)
-            galleryOpensFirstPhoto = scene == "detail"
-            showGallery = true
+            galleryRequest = GalleryRequest(initialPhotoID: nil)
+        case "detail":
+            var waited = 0
+            while model.library.photos.isEmpty && waited < 200 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                waited += 1
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let first = model.library.photos.first else {
+                ScreenshotMode.log("detail: no photos in the library after \(waited / 10) s")
+                return
+            }
+            ScreenshotMode.log("detail: presenting gallery with photo \(first.id) pushed")
+            galleryRequest = GalleryRequest(initialPhotoID: first.id)
         case "editor":
             var waited = 0
             while model.engineState == .starting && waited < 150 {
@@ -149,13 +189,12 @@ struct CameraScreen: View {
                                  outputLongEdge: model.settings.outputQuality.longEdge)
         case "library":
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            libraryFilter = .all
-            showLibrary = true
+            libraryRequest = LibraryRequest(filter: .all)
         case "settings":
-            showSettings = true
+            settingsRequest = SettingsRequest(startAtAbout: false)
         case "about":
-            settingsAtAbout = true
-            showSettings = true
+            ScreenshotMode.log("about: presenting settings with About pushed")
+            settingsRequest = SettingsRequest(startAtAbout: true)
         default:
             break
         }
@@ -165,7 +204,7 @@ struct CameraScreen: View {
 // MARK: - Engine status
 
 /// Shown above the film chooser when the developing engine could not start
-/// (the camera keeps working).
+/// (the camera keeps working). Takes no space otherwise.
 struct EngineStatusCard: View {
     @Environment(AppModel.self) private var model
 
@@ -178,14 +217,14 @@ struct EngineStatusCard: View {
             if let message {
                 HStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 16))
+                        .font(.system(size: 15))
                         .foregroundStyle(Theme.lcd)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("冲洗引擎启动失败")
-                            .font(AppFont.ui(14, .semibold))
+                            .font(AppFont.ui(13, .semibold))
                             .foregroundStyle(Theme.text)
                         Text(message)
-                            .font(AppFont.ui(11.5))
+                            .font(AppFont.ui(11))
                             .foregroundStyle(Theme.secondary)
                             .lineLimit(2)
                     }
@@ -196,16 +235,20 @@ struct EngineStatusCard: View {
                     } label: {
                         Text("重试")
                             .font(AppFont.ui(13, .semibold))
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(Theme.text)
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Capsule().fill(Theme.accent.opacity(0.12)))
+                            .frame(height: 30)
+                            .background(Capsule().fill(Color.white.opacity(0.1)))
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.pressable)
                 }
-                .padding(12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
                 .surfaceCard(radius: 14)
                 .padding(.horizontal, 16)
+                .padding(.top, 8)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -260,18 +303,17 @@ struct CameraPermissionView: View {
                         .rotationEffect(.degrees(appeared ? 0 : -60))
                 }
                 Text("让胶片机看见世界")
-                    .font(AppFont.ui(24, .semibold))
+                    .font(AppFont.ui(28, .semibold))
                     .foregroundStyle(Theme.text)
                     .padding(.top, 30)
                 Text("取景和拍摄需要使用相机。\n照片只保存在这台手机上，不会上传到任何地方。")
-                    .font(AppFont.ui(14))
+                    .font(AppFont.ui(15))
                     .foregroundStyle(Theme.secondary)
                     .multilineTextAlignment(.center)
                     .lineSpacing(5)
                     .padding(.top, 12)
                 Spacer()
                 Button {
-                    Haptics.tap()
                     if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                 } label: {
                     PrimaryCapsule(title: "前往设置开启相机", systemImage: "gearshape")
@@ -281,9 +323,9 @@ struct CameraPermissionView: View {
                     onBrowse()
                 } label: {
                     Text("先看看底片，或导入照片冲洗")
-                        .font(AppFont.ui(14))
+                        .font(AppFont.ui(15))
                         .foregroundStyle(Theme.secondary)
-                        .padding(.vertical, 10)
+                        .frame(minHeight: 44)
                 }
                 .buttonStyle(.pressable)
                 .padding(.top, 8)
