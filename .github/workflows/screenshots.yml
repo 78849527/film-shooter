@@ -1,0 +1,62 @@
+# Build for the iOS Simulator, run the app in screenshot mode and capture every
+# main screen plus the engine's developed prints, for visual review.
+name: Screenshots
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+concurrency:
+  group: shots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shots:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      IOS_MIN: '18.0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_*.app | grep -v beta | sort -V | tail -1)
+          sudo xcode-select -s "$XC"; xcodebuild -version
+
+      - name: Metal toolchain
+        run: |
+          xcrun -sdk iphonesimulator metal --version \
+            || (xcodebuild -downloadComponent MetalToolchain && xcrun -sdk iphonesimulator metal --version)
+
+      - name: XcodeGen
+        run: command -v xcodegen || brew install xcodegen
+
+      - name: Engine kernels for the simulator
+        run: SDK=iphonesimulator bash scripts/build_engine_resources.sh
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          mkdir -p build/logs
+          xcodebuild -project FilmShooter.xcodeproj -scheme FilmShooter \
+            -configuration Release -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build/logs/sim-build.log | grep -E "error:|\*\* BUILD" || true
+          grep -q "\*\* BUILD SUCCEEDED \*\*" build/logs/sim-build.log
+
+      - name: Screenshots
+        run: bash scripts/screenshots.sh build/DerivedData/Build/Products/Release-iphonesimulator/FilmShooter.app build/shots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: build/shots
+          if-no-files-found: ignore

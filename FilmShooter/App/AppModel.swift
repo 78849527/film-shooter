@@ -84,11 +84,13 @@ final class AppModel {
         do {
             try await FilmEngine.shared.start()
             engineState = .ready
+            ScreenshotMode.log("engine ready: \(String(cString: spk_build_info()))")
             FilmEngine.shared.warmUp(film: recipe.filmID, paper: recipe.resolvedPaperID)
             refreshLUT()
             darkroom.setForeground(true)
         } catch {
             engineState = .failed(error.localizedDescription)
+            ScreenshotMode.log("engine failed: \(error.localizedDescription)")
         }
     }
 
@@ -141,7 +143,9 @@ final class AppModel {
             try? await Task.sleep(nanoseconds: 90_000_000)
             guard let self, !Task.isCancelled else { return }
             do {
+                let t0 = Date()
                 let table = try await self.luts.lut(for: wanted)
+                ScreenshotMode.log("LUT \(wanted.filmID) in \(String(format: "%.0f", Date().timeIntervalSince(t0) * 1000)) ms")
                 guard !Task.isCancelled, self.recipe == wanted else { return }
                 self.lut = table
                 self.isBakingLUT = false
@@ -149,6 +153,7 @@ final class AppModel {
             } catch {
                 guard !Task.isCancelled else { return }
                 self.isBakingLUT = false
+                ScreenshotMode.log("LUT failed: \(error.localizedDescription)")
                 self.show("取景预览生成失败：\(error.localizedDescription)")
             }
         }

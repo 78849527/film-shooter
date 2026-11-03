@@ -123,6 +123,7 @@ final class Darkroom {
             let photo = try await develop(source: source, recipe: recipe, aspect: aspect,
                                           frameNumber: frameNumber, captureDate: date)
             recentDurations.append(Date().timeIntervalSince(started))
+            ScreenshotMode.log("developed \(recipe.filmID) \(photo.width)x\(photo.height) in \(String(format: "%.2f", Date().timeIntervalSince(started))) s")
             if case .redevelop(let old) = source {
                 library.update(photo)
                 _ = old
@@ -139,6 +140,7 @@ final class Darkroom {
         } catch {
             let message = error.localizedDescription
             lastError = message
+            ScreenshotMode.log("develop failed \(recipe.filmID): \(message)")
             if let j = jobs.firstIndex(where: { $0.id == id }) {
                 // Sent to the background mid-render: just try again later.
                 jobs[j].phase = isForeground ? .failed(message) : .queued
