@@ -77,13 +77,13 @@ final class AppModel {
         self.library = library
         self.camera = CameraService()
         self.darkroom = Darkroom(library: library, settings: settings)
+        var initial = DevelopRecipe()
         if let data = UserDefaults.standard.data(forKey: "recipe"),
            let r = try? JSONDecoder().decode(DevelopRecipe.self, from: data) {
-            recipe = r
-        } else {
-            recipe = DevelopRecipe()
+            initial = r
         }
-        filmID = recipe.filmID
+        recipe = initial
+        filmID = initial.filmID
         frameNumber = max(1, UserDefaults.standard.integer(forKey: "frameNumber"))
         lut = luts.cached(for: recipe)
     }
