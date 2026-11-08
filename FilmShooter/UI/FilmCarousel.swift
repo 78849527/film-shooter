@@ -240,6 +240,10 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
     /// The last id this picker committed itself (its echo through
     /// `committedID` must not scroll the carousel).
     @State private var ownCommit: String?
+    /// Darkroom-only filter. nil = 全部; a kind shows only its own films.
+    /// This is independent of the applied film, so browsing the full catalog
+    /// does not switch back to a single category.
+    @State private var visibleKind: FilmKind? = nil
 
     init(style: FilmCarousel.Style, groupedByKind: Bool = false, committedID: String,
          onCommit: @escaping (String) -> Void, onTapCentered: (() -> Void)? = nil,
@@ -274,24 +278,42 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
             }
 
             FilmCarousel(style: style,
-                         films: groupedByKind ? FilmCatalog.films(of: appliedFilm.kind) : FilmCatalog.films,
+                         films: groupedByKind && visibleKind != nil
+                             ? FilmCatalog.films(of: visibleKind!)
+                             : FilmCatalog.films,
                          centeredID: $centeredID, onTap: tapCard,
                          onSettle: { selected in settled(selected) },
                          deterministicSwipe: groupedByKind, programmaticTarget: jumpTarget,
                          programmaticUntil: jumpUntil, onUserDrag: cancelProgrammaticJump)
-                // Tear down old iOS 16 geometry when the darkroom switches
-                // category. A new category gets an independent scroll list.
-                .id(groupedByKind ? appliedFilm.kind.rawValue : "all")
+                // Switching filters rebuilds the iOS 16 ScrollView, keeping
+                // the new category free of prior geometry and inertia.
+                .id(groupedByKind ? (visibleKind?.rawValue ?? "all") : "camera")
                 .opacity(dimmed ? 0 : 1)
 
             HStack(spacing: 10) {
                 leading()
-                KindChips(current: appliedFilm.kind, compact: style == .compact) { kind in
-                    // The browsing scroll position can already be in this
-                    // category while the applied recipe is still the old kind.
-                    guard let first = FilmCatalog.films(of: kind).first else { return }
-                    if committedID != first.id {
-                        jump(to: first.id, haptic: true, commit: true)
+                if groupedByKind {
+                    DarkroomKindChips(current: visibleKind, compact: style == .compact) { kind in
+                        guard visibleKind != kind else { return }
+                        visibleKind = kind
+                        if let kind, let first = FilmCatalog.films(of: kind).first {
+                            // Apply the chosen category's first real stock
+                            // immediately; its paper stays user-selected when
+                            // compatible. No stale scroll data is consulted.
+                            jump(to: first.id, haptic: true, commit: true)
+                        } else {
+                            // 全部 only changes which films are visible.
+                            // Do not reset film, paper or the finished preview.
+                            Haptics.selection()
+                            jump(to: committedID, haptic: false, commit: false)
+                        }
+                    }
+                } else {
+                    KindChips(current: appliedFilm.kind, compact: style == .compact) { kind in
+                        guard let first = FilmCatalog.films(of: kind).first else { return }
+                        if committedID != first.id {
+                            jump(to: first.id, haptic: true, commit: true)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -303,6 +325,12 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
         }
         .compatibleOnChange(of: centeredID) { _, new in centeredChanged(new) }
         .compatibleOnChange(of: committedID) { _, new in
+            // If another view selected an off-filter film, reveal its kind.
+            // The 全部 filter intentionally remains 全部.
+            if groupedByKind, let kind = visibleKind,
+               FilmCatalog.film(new).kind != kind {
+                visibleKind = FilmCatalog.film(new).kind
+            }
             if new == ownCommit {
                 ownCommit = nil
                 return
@@ -380,9 +408,10 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
     /// event. Programmatic movements remain excluded by jumpUntil.
     private func settled(_ id: String) {
         guard armed, Date() >= jumpUntil, id != committedID else { return }
-        // Validate against the visible category before applying a new recipe.
-        // No cross-category finger-up can pick a hidden/old stock.
-        if groupedByKind && FilmCatalog.film(id).kind != appliedFilm.kind { return }
+        // A filtered list cannot select a stock from another category.
+        // 全部 intentionally permits swipes across all four kinds.
+        if groupedByKind, let kind = visibleKind,
+           FilmCatalog.film(id).kind != kind { return }
         settleTask?.cancel()
         ownCommit = id
         onCommit(id)
@@ -465,6 +494,53 @@ struct KindChips: View {
             }
         }
         .animation(Motion.snappy, value: current)
+    }
+}
+
+
+/// The darkroom filter includes a fifth, "全部", mode. Its selection is
+/// independent of the film kind: users can browse all stocks without
+/// changing the selected film or manually chosen print paper.
+private struct DarkroomKindChips: View {
+    let current: FilmKind?
+    var compact: Bool = false
+    let onSelect: (FilmKind?) -> Void
+
+    @Namespace private var namespace
+
+    var body: some View {
+        HStack(spacing: compact ? 2 : 4) {
+            chip(title: "全部", value: nil)
+            ForEach(FilmKind.allCases) { kind in
+                chip(title: kind.chipTitle, value: kind)
+            }
+        }
+        .animation(Motion.snappy, value: current)
+    }
+
+    private func chip(title: String, value: FilmKind?) -> some View {
+        let selected = current == value
+        return Button {
+            onSelect(value)
+        } label: {
+            Text(title)
+                .font(AppFont.ui(compact ? 12 : 13, .semibold))
+                .foregroundStyle(selected ? Theme.text : Theme.secondary)
+                .padding(.horizontal, compact ? 6 : 10)
+                .frame(height: 30)
+                .background {
+                    if selected {
+                        Capsule()
+                            .fill(Theme.surfaceHigher)
+                            .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.45), lineWidth: 1))
+                            .matchedGeometryEffect(id: "darkroomKind", in: namespace)
+                    }
+                }
+                .frame(minHeight: 34)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressable(scale: 0.94))
+        .accessibilityLabel(Text(value?.title ?? "全部胶片"))
     }
 }
 

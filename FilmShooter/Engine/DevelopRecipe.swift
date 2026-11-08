@@ -72,14 +72,12 @@ struct DevelopRecipe: Codable, Hashable {
 
     mutating func selectFilm(_ id: String) {
         guard id != filmID else { return }
-        // A new film brings its own reference paper. Preserve a manual paper
-        // choice only while adjusting the same film; never carry a Kodak
-        // paper across to a Fujifilm stock just because both are colour.
-        let selected = FilmCatalog.film(id)
-        filmID = selected.id
-        paperID = selected.kind.usesPrintPaper
-            ? selected.defaultPaper
-            : "kodak_portra_endura" // engine-required neutral carrier for slides
+        // Changing film must not erase a manually chosen print paper.
+        // resolvedPaperID already uses this paper if it is compatible with
+        // the new stock, or a valid default for incompatible/slide stocks.
+        // In particular, visiting a slide stock must not overwrite the
+        // previous colour-paper selection.
+        filmID = FilmCatalog.film(id).id
     }
 
     /// Per-stock grain scaling for the measured B&W profiles (their sheets give a
