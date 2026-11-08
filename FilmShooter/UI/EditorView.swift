@@ -1,286 +1,54 @@
 import SwiftUI
 import UIKit
 
-/// The darkroom editor: one photo held open in the engine while films,
-/// papers and print settings are tried on it. The preview sits like a print
-/// on the table; the film chooser is pinned under it and only the print
-/// controls scroll.
+/// Main-app darkroom. The image occupies the entire editor canvas; the
+/// carousel, paper and print parameters now live in optional side drawers.
+/// This keeps the spectral editor model and its revision-safe render pipeline
+/// unchanged while making portrait and landscape photos much larger.
 struct EditorView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     @ObservedObject var editor: EditorModel
 
-    @GestureState private var showingOriginal = false
     @State private var sent = false
-    @State private var showHint = true
     @State private var editingPriorityActive = false
 
     var body: some View {
-        GeometryReader { geo in
-            VStack(spacing: 0) {
-                header
-                preview
-                    .frame(height: max(200, geo.size.height * 0.4))
-                    .padding(.horizontal, 24)
-                    .padding(.top, 4)
-                    .padding(.bottom, 12)
-                EditorFilmSection(editor: editor)
-                    .padding(.bottom, 8)
-                    .disabled(sent)
-                controls
+        DarkroomWorkspace(editor: editor,
+                          settings: model.settings,
+                          sent: sent,
+                          onCancel: { dismiss() },
+                          onDevelop: develop)
+            .background(Color.black.ignoresSafeArea())
+            .onAppear {
+                // This is the only full-screen view that allows landscape.
+                // The camera and other root views remain portrait.
+                EditorOrientation.begin()
             }
-        }
-        .background(Theme.background.ignoresSafeArea())
-        .task {
-            // LUT prebaking and the photo editor share a serial GPU queue.
-            // Give the user's chosen film priority over background tables.
-            if !editingPriorityActive {
-                editingPriorityActive = true
-                model.beginPhotoEditing()
+            .task {
+                if !editingPriorityActive {
+                    editingPriorityActive = true
+                    model.beginPhotoEditing()
+                }
+                await editor.load(library: model.library)
             }
-            await editor.load(library: model.library)
-        }
-        .task {
-            try? await Task.sleep(nanoseconds: 3_500_000_000)
-            withAnimation(.easeOut(duration: 0.5)) { showHint = false }
-        }
-        .onDisappear {
-            editor.close()
-            if editingPriorityActive {
-                editingPriorityActive = false
-                model.endPhotoEditing()
-            }
-        }
-    }
-
-    // MARK: header
-
-    private var header: some View {
-        ZStack {
-            VStack(spacing: 1) {
-                Text("暗房")
-                    .font(AppFont.ui(17, .semibold))
-                    .foregroundStyle(Theme.text)
-                if editor.isLoading {
-                    Text("显影中")
-                        .font(AppFont.ui(11))
-                        .foregroundStyle(Theme.secondary)
-                        .transition(.opacity)
+            .onDisappear {
+                EditorOrientation.end()
+                editor.close()
+                if editingPriorityActive {
+                    editingPriorityActive = false
+                    model.endPhotoEditing()
                 }
             }
-            .animation(Motion.fade, value: editor.isLoading)
-
-            HStack(spacing: 12) {
-                Button {
-                    dismiss()
-                } label: {
-                    Text("取消")
-                        .font(AppFont.ui(15))
-                        .foregroundStyle(Theme.secondary)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.pressable)
-
-                Spacer(minLength: 0)
-
-                Button {
-                    develop()
-                } label: {
-                    PrimaryCapsule(title: "冲洗", systemImage: "drop.fill", isEnabled: editor.canDevelop, height: 34)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.pressable)
-                .disabled(!editor.canDevelop || sent)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 4)
-        .frame(height: 50)
     }
-
-    // MARK: preview
-
-    private var preview: some View {
-        ZStack {
-            if editor.isLoading {
-                DevelopingLoader(original: editor.original)
-                    .transition(.opacity)
-            } else if editor.preview == nil, let error = editor.error {
-                errorCard(error)
-                    .transition(.opacity)
-            } else {
-                printView
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 0).updating($showingOriginal) { _, state, _ in state = true },
-                 including: editor.preview != nil && editor.original != nil ? .all : .subviews)
-        .overlay(alignment: .top) {
-            RenderingBar(active: editor.isRendering && !editor.isLoading)
-                .padding(.horizontal, 40)
-        }
-        .overlay(alignment: .top) {
-            if showingOriginal {
-                Text("原图")
-                    .font(AppFont.ui(13, .semibold))
-                    .foregroundStyle(Theme.text)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color.black.opacity(0.6)))
-                    .padding(.top, 12)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
-            }
-        }
-        .overlay(alignment: .bottom) {
-            if let error = editor.error, editor.preview != nil {
-                Text(error)
-                    .font(AppFont.ui(12))
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(2)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(Theme.danger.opacity(0.85)))
-                    .padding(.bottom, 10)
-                    .transition(.opacity)
-            } else if showHint && editor.preview != nil && !showingOriginal {
-                Text("按住对比原图")
-                    .font(AppFont.ui(12))
-                    .foregroundStyle(Theme.text.opacity(0.85))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color.black.opacity(0.5)))
-                    .padding(.bottom, 10)
-                    .transition(.opacity)
-            }
-        }
-        .scaleEffect(sent ? (reduceMotion ? 1 : 0.84) : 1)
-        .offset(y: sent && !reduceMotion ? 60 : 0)
-        .opacity(sent ? 0 : 1)
-        .animation(.easeOut(duration: 0.35), value: editor.isLoading)
-        .animation(.easeOut(duration: 0.14), value: showingOriginal)
-        .animation(Motion.fade, value: editor.error)
-        .compatibleOnChange(of: showingOriginal) { _, on in if on { Haptics.softTap(0.4) } }
-    }
-
-    /// The preview as a print: its own aspect, small rounded corners, and a
-    /// soft shadow cast by a static shape (so cross-fades don't re-render it).
-    private var printView: some View {
-        let aspect: CGFloat = editor.preview.map { $0.size.width / max(1, $0.size.height) } ?? (2.0 / 3.0)
-        let corner = RoundedRectangle(cornerRadius: 4, style: .continuous)
-        return ZStack {
-            Color.black
-            if editor.previewMatchesSelection, let image = editor.preview {
-                // Display the exact completed image, without a second
-                // CrossfadeImage state machine retaining the PREVIOUS frame.
-                Image(uiImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-            } else if let original = editor.original {
-                // While the engine works, show a visibly neutral placeholder,
-                // never a previous film with the new film's name.
-                Image(uiImage: original)
-                    .resizable()
-                    .scaledToFit()
-                    .blur(radius: 5)
-                    .opacity(0.45)
-            }
-            if showingOriginal, let original = editor.original {
-                ZStack {
-                    Color.black
-                    Image(uiImage: original)
-                        .resizable()
-                        .scaledToFit()
-                }
-                .transition(.opacity)
-            }
-        }
-        .aspectRatio(aspect, contentMode: .fit)
-        .clipShape(corner)
-        .overlay(alignment: .center) {
-            if !editor.isLoading && !editor.previewMatchesSelection && editor.error == nil {
-                VStack(spacing: 7) {
-                    ProgressView()
-                        .tint(Theme.accent)
-                    Text("正在显影：\(editor.recipe.film.name)")
-                        .lineLimit(1)
-                        .font(AppFont.ui(12, .medium))
-                        .foregroundStyle(Theme.text)
-                }
-                .padding(.horizontal, 17)
-                .padding(.vertical, 13)
-                .background(Capsule().fill(Color.black.opacity(0.82)))
-                .allowsHitTesting(false)
-            }
-        }
-        .background(
-            corner
-                .fill(Color.black)
-                .shadow(color: .black.opacity(0.55), radius: 14, y: 8)
-        )
-        .animation(.easeOut(duration: 0.2), value: aspect)
-    }
-
-    private func errorCard(_ message: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(Theme.lcd)
-            Text("这张照片没能显影")
-                .font(AppFont.ui(17, .semibold))
-                .foregroundStyle(Theme.text)
-            Text(message)
-                .font(AppFont.ui(13))
-                .foregroundStyle(Theme.secondary)
-                .multilineTextAlignment(.center)
-            Button {
-                Task { await editor.load(library: model.library) }
-            } label: {
-                PrimaryCapsule(title: "再试一次", systemImage: "arrow.clockwise", height: 34)
-            }
-            .buttonStyle(.pressable)
-            .padding(.top, 4)
-        }
-        .padding(28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .surfaceCard(radius: 18)
-    }
-
-    // MARK: controls
-
-    private var controls: some View {
-        ScrollView {
-            RecipeControls(recipe: $editor.recipe, showsExposure: true)
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 30)
-        }
-        .scrollIndicators(.hidden)
-        .background(
-            UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26, style: .continuous)
-                .fill(Theme.surface.opacity(0.6))
-                .overlay(
-                    UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26, style: .continuous)
-                        .strokeBorder(Theme.hairline, lineWidth: 1)
-                )
-                .ignoresSafeArea(edges: .bottom)
-        )
-        .disabled(sent)
-    }
-
-    // MARK: develop
 
     private func develop() {
         guard editor.canDevelop, !sent else { return }
         Haptics.filmAdvance()
         editor.develop(into: model.darkroom, frameNumber: model.frameNumber)
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .spring(response: 0.45, dampingFraction: 0.86)) {
+        withAnimation(reduceMotion ? .easeOut(duration: 0.2) :
+                      .spring(response: 0.45, dampingFraction: 0.86)) {
             sent = true
         }
         model.show("已送进暗房冲洗")
