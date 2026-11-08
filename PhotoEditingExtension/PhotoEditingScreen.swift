@@ -56,8 +56,10 @@ struct PhotoEditingScreen: View {
             Spacer()
             if model.isFinishing {
                 ProgressView()
-                Text("正在导出")
-                    .font(.system(size: 12))
+                Text(model.exportStage.isEmpty ? "正在导出" : model.exportStage)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             } else if model.isRendering || model.isLoading {
                 ProgressView()
                 Text("显影中")

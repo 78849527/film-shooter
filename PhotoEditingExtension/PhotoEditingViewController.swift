@@ -45,15 +45,41 @@ final class PhotoEditingViewController: UIViewController, PHContentEditingContro
         model.cancel()
     }
 
+    private var finishDelivered = false
+    private var finishTask: Task<Void, Never>?
+    private var finishWatchdog: Task<Void, Never>?
+
     func finishContentEditing(completionHandler: @escaping (PHContentEditingOutput?) -> Void) {
-        Task { [model] in
+        // One completion per Photos save request, even if GPU work stalls.
+        guard !finishDelivered, finishTask == nil else { return }
+
+        finishWatchdog = Task { [weak self] in
             do {
-                let output = try await model.finish()
-                completionHandler(output)
-            } catch {
-                model.error = "无法保存胶片效果：\(error.localizedDescription)"
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch { return }
+            guard let self, !self.finishDelivered else { return }
+            self.finishDelivered = true
+            self.model.error = "导出超时，未修改原照片。请尝试较小的图片。"
+            self.model.cancel()
+            completionHandler(nil)
+        }
+
+        finishTask = Task { [weak self] in
+            guard let self else {
                 completionHandler(nil)
+                return
             }
+            let output: PHContentEditingOutput?
+            do {
+                output = try await self.model.finish()
+            } catch {
+                self.model.error = "无法保存胶片效果：\(error.localizedDescription)"
+                output = nil
+            }
+            guard !self.finishDelivered else { return }
+            self.finishDelivered = true
+            self.finishWatchdog?.cancel()
+            completionHandler(output)
         }
     }
 }

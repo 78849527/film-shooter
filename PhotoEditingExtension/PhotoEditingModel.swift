@@ -17,7 +17,10 @@ final class PhotoEditingModel: ObservableObject {
 
     static let formatIdentifier = "io.github.filmshooter.photoedit"
     static let formatVersion = "1"
-    static let maximumOutputLongEdge = 4096
+    /// Keep the first iOS 16 photo-extension export within its process memory
+    /// budget. The former 4096px RGBAf input alone could exceed 190 MB on a
+    /// 4:3 photo, while the open preview session still owned GPU allocations.
+    static let maximumOutputLongEdge = 2048
 
     @Published var recipe: DevelopRecipe = {
         var r = DevelopRecipe()
@@ -37,6 +40,7 @@ final class PhotoEditingModel: ObservableObject {
     @Published private(set) var isLoading = true
     @Published private(set) var isRendering = false
     @Published private(set) var isFinishing = false
+    @Published private(set) var exportStage = ""
     @Published private(set) var hasChanges = false
     @Published var error: String?
 
@@ -71,6 +75,7 @@ final class PhotoEditingModel: ObservableObject {
         rendered = nil
         isLoading = true
         isFinishing = false
+        exportStage = ""
         pending = false
         captureDate = nil
 
@@ -189,35 +194,66 @@ final class PhotoEditingModel: ObservableObject {
         guard !closed, !isFinishing, let input, let url = input.fullSizeImageURL else {
             throw EngineError.decode("系统照片没有提供完整原图")
         }
+        let target = recipe
         isFinishing = true
+        exportStage = "正在释放预览缓存"
         defer { isFinishing = false }
 
-        let target = recipe
-        let engine = FilmEngine.shared
-        try await engine.start()
+        // The extension was holding a 1600px interactive spectral session and
+        // a separate rendered CGImage while allocating a 4096px 32-bit float
+        // input. That peak can exceed Photos extension's memory allowance.
+        // Stop and release the live session before any export allocation.
+        closed = true
+        revision &+= 1
+        pending = false
+        debounceTask?.cancel()
+        loadingTask?.cancel()
+        session?.cancelInFlight()
+        session?.close() // enqueues the engine release on its serial queue
+        session = nil
+        rendered = nil
+        original = nil
 
-        // Full-size export is separate from the on-screen preview; never
-        // encode a 1400px preview as the final Photos edit.
+        let engine = FilmEngine.shared
+        // The release above runs on the same serial queue as engine.run.
+        // This fence waits until the session is actually destroyed.
+        try await engine.run { () -> Void in }
+        exportStage = "读取照片并准备显影"
+        try await engine.start()
+        try Task.checkCancellation()
+
+        let output = PHContentEditingOutput(contentEditingInput: input)
+        // For still Photos edits, Apple requires JPEG, with image orientation
+        // already applied to the pixel data.
+        let outputURL = output.renderedContentURL
+        let sourceURL = url
+        let edge = Self.maximumOutputLongEdge
+
         let frame = try await engine.run {
-            let ci = try PhotoDecoder.ciImage(contentsOf: url)
+            let ci = try PhotoDecoder.ciImage(contentsOf: sourceURL)
             let prepared = PhotoDecoder.prepare(
-                ci, aspect: nil, maxLongEdge: Self.maximumOutputLongEdge
+                ci, aspect: nil, maxLongEdge: edge
             )
             return try engine.makeFrame(from: prepared)
         }
+        exportStage = "光谱胶片显影中"
+        try Task.checkCancellation()
         let params = target.engineParams(aspect: frame.aspect, purpose: .develop,
                                          captureDate: captureDate)
         let print = try await engine.develop(frame: frame, params: params)
-        let output = PHContentEditingOutput(contentEditingInput: input)
-        let outputURL = output.renderedContentURL
+        exportStage = "正在写入照片"
+        try Task.checkCancellation()
 
-        // Apple requires a JPEG with upright pixels at renderedContentURL.
-        // Preserve safe EXIF metadata, writing orientation=up.
+        // Do not decode or map the entire original a second time for metadata
+        // while full-resolution GPU textures are resident. Photos preserves
+        // the asset's library metadata; the output JPEG carries upright pixels.
         try await Task.detached(priority: .userInitiated) {
-            let data = try Data(contentsOf: url, options: .mappedIfSafe)
-            let metadata = PhotoDecoder.metadata(of: data)
             try PhotoDecoder.write(print.cgImage, to: outputURL, format: .jpeg,
-                                   quality: 0.94, metadata: metadata)
+                                   quality: 0.94, metadata: [:])
+            let file = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+            guard (file[.size] as? NSNumber)?.intValue ?? 0 > 1024 else {
+                throw EngineError.encode
+            }
         }.value
 
         let adjustment = try JSONEncoder().encode(target)
@@ -226,6 +262,7 @@ final class PhotoEditingModel: ObservableObject {
             formatVersion: Self.formatVersion,
             data: adjustment
         )
+        exportStage = "已生成，交回系统照片"
         return output
     }
 
