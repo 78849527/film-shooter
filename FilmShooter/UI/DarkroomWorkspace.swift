@@ -17,8 +17,8 @@ struct DarkroomWorkspace: View {
     @State private var filmPanelOpen = false
     @State private var chromeHidden = false
     @State private var resetZoomToken = 0
-    /// Docked by default. Long-pressing the panel title unlocks dragging
-    /// without conflicting with the film carousel and slider gestures.
+    /// Long press first unlocks floating mode. A separate pan then moves it,
+    /// so the panel never relocates while its activation touch is being tracked.
     @State private var panelFloating = false
     @State private var floatingOffset: CGSize = .zero
     @State private var floatingDragStart: CGSize = .zero
@@ -254,16 +254,18 @@ struct DarkroomWorkspace: View {
         floatingDragStart = .zero
     }
 
-    /// UIKit owns this gesture for its entire lifecycle, even when SwiftUI
-    /// updates floatingOffset on every move. That avoids iOS 16 losing the
-    /// combined LongPressGesture.sequenced(DragGesture) state and freezing.
+    /// Unlock movement without repositioning the panel under the activation
+    /// touch. The next pan gesture performs the actual move.
+    private func activateFloatingPanel() {
+        guard !panelFloating else { return }
+        floatingDragStart = floatingOffset
+        panelFloating = true
+        Haptics.selection()
+    }
+
     private func movePanel(_ translation: CGSize, in available: CGSize,
                            panelWidth: CGFloat, panelHeight: CGFloat) {
-        if !panelFloating {
-            panelFloating = true
-            floatingDragStart = floatingOffset
-            Haptics.selection()
-        }
+        guard panelFloating else { return }
         let target = CGSize(width: floatingDragStart.width + translation.width,
                             height: floatingDragStart.height + translation.height)
         floatingOffset = constrainedPanelOffset(target, in: available,
@@ -287,7 +289,7 @@ struct DarkroomWorkspace: View {
             VStack(alignment: .leading, spacing: 2) {
                 Label("胶片", systemImage: "camera.filters")
                     .font(AppFont.ui(14, .semibold))
-                Text(panelFloating ? "拖动位置 · 点击关闭后复位" : "长按标题后拖动悬浮")
+                Text(panelFloating ? "悬浮模式 · 松开后拖动标题移动" : "长按标题进入悬浮模式")
                     .font(AppFont.ui(10))
                     .foregroundStyle(Theme.secondary)
             }
@@ -295,6 +297,8 @@ struct DarkroomWorkspace: View {
             .frame(minWidth: 138, minHeight: 33, alignment: .leading)
             .overlay {
                 DarkroomPanelDragHandle(
+                    isFloating: panelFloating,
+                    onActivate: activateFloatingPanel,
                     onMove: { delta in
                         movePanel(delta, in: available, panelWidth: panelWidth,
                                   panelHeight: panelHeight)
@@ -528,58 +532,91 @@ struct DarkroomZoomCanvas: View {
 }
 
 
-/// A stable UIKit recognizer handles a continuous press-and-drag on iOS 16.
-/// The recognizer lives on its own UIView and isn't replaced when the panel
-/// changes its SwiftUI state/position while the finger is down.
+/// iOS 16 safe two-step floating interaction: long press unlocks floating
+/// mode; a fresh pan gesture moves the panel. The activation recognizer never
+/// tracks a view that is moving underneath the finger.
 private struct DarkroomPanelDragHandle: UIViewRepresentable {
+    let isFloating: Bool
+    let onActivate: () -> Void
     let onMove: (CGSize) -> Void
     let onEnd: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onMove: onMove, onEnd: onEnd)
+        Coordinator(onActivate: onActivate, onMove: onMove, onEnd: onEnd)
     }
 
     func makeUIView(context: Context) -> UIView {
         let view = UIView(frame: .zero)
         view.backgroundColor = .clear
-        let gesture = UILongPressGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handle(_:))
-        )
-        gesture.minimumPressDuration = 0.38
-        gesture.allowableMovement = 22
-        gesture.cancelsTouchesInView = true
-        view.addGestureRecognizer(gesture)
+        context.coordinator.configure(view, isFloating: isFloating)
         return view
     }
 
     func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.onActivate = onActivate
         context.coordinator.onMove = onMove
         context.coordinator.onEnd = onEnd
+        context.coordinator.configure(view, isFloating: isFloating)
     }
 
     final class Coordinator: NSObject {
+        var onActivate: () -> Void
         var onMove: (CGSize) -> Void
         var onEnd: () -> Void
-        private var start: CGPoint?
+        private weak var view: UIView?
+        private var longPress: UILongPressGestureRecognizer?
+        private var pan: UIPanGestureRecognizer?
+        private var configuredForFloating: Bool?
 
-        init(onMove: @escaping (CGSize) -> Void, onEnd: @escaping () -> Void) {
+        init(onActivate: @escaping () -> Void,
+             onMove: @escaping (CGSize) -> Void,
+             onEnd: @escaping () -> Void) {
+            self.onActivate = onActivate
             self.onMove = onMove
             self.onEnd = onEnd
         }
 
-        @objc func handle(_ recognizer: UILongPressGestureRecognizer) {
-            let position = recognizer.location(in: recognizer.view?.window)
+        func configure(_ view: UIView, isFloating: Bool) {
+            self.view = view
+            guard configuredForFloating != isFloating else { return }
+            if let longPress { view.removeGestureRecognizer(longPress) }
+            if let pan { view.removeGestureRecognizer(pan) }
+            longPress = nil
+            pan = nil
+            configuredForFloating = isFloating
+
+            if isFloating {
+                let gesture = UIPanGestureRecognizer(
+                    target: self, action: #selector(handlePan(_:))
+                )
+                gesture.minimumNumberOfTouches = 1
+                gesture.maximumNumberOfTouches = 1
+                gesture.cancelsTouchesInView = false
+                view.addGestureRecognizer(gesture)
+                pan = gesture
+            } else {
+                let gesture = UILongPressGestureRecognizer(
+                    target: self, action: #selector(handleLongPress(_:))
+                )
+                gesture.minimumPressDuration = 0.42
+                gesture.allowableMovement = 18
+                gesture.cancelsTouchesInView = false
+                view.addGestureRecognizer(gesture)
+                longPress = gesture
+            }
+        }
+
+        @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+            guard recognizer.state == .began else { return }
+            onActivate()
+        }
+
+        @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
             switch recognizer.state {
-            case .began:
-                start = position
-                onMove(.zero)
-            case .changed:
-                guard let start else { return }
-                onMove(CGSize(width: position.x - start.x,
-                              height: position.y - start.y))
+            case .began, .changed:
+                let delta = recognizer.translation(in: recognizer.view?.window)
+                onMove(CGSize(width: delta.x, height: delta.y))
             case .ended, .cancelled, .failed:
-                start = nil
                 onEnd()
             default:
                 break
