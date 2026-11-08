@@ -420,7 +420,7 @@ struct KindChips: View {
 /// The camera screen's film chooser, bound to `model.filmID` (which changes
 /// only with the film, not with print-slider ticks).
 struct CameraFilmSection: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     let openPrint: () -> Void
     let openLibrary: () -> Void
 
