@@ -15,7 +15,7 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 engine="$here/Engine"
 out="$here/build/EngineResources"
 air="$here/build/air"
-IOS_MIN=${IOS_MIN:-18.0}
+IOS_MIN=${IOS_MIN:-16.5}
 SDK=${SDK:-iphoneos}
 
 if [[ "$SDK" == "iphonesimulator" ]]; then
