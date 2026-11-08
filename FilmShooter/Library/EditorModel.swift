@@ -6,7 +6,7 @@ import UIKit
 /// films, papers and print settings on it; every change re-renders a
 /// screen-sized print (the negative is cached, so print-side changes are fast).
 @MainActor
-final class EditorModel: Identifiable, ObservableObject {
+final class EditorModel: ObservableObject, Identifiable {
     enum Source {
         case imported(data: Data, isRAW: Bool)
         case existing(DevelopedPhoto)

@@ -143,29 +143,12 @@ struct CompatibleCaptureEventModifier: ViewModifier {
 }
 
 extension View {
-    /// Preserve the iOS 18 zoom transition for gallery detail, while the
-    /// classic NavigationStack push remains usable on iOS 16.
     @ViewBuilder
-    func compatibleNavigationZoom<ID: Hashable>(sourceID: ID, namespace: Namespace.ID) -> some View {
+    func compatibleDetailTransition<ID: Hashable>(id: ID, namespace: Namespace.ID) -> some View {
         if #available(iOS 18.0, *) {
-            navigationTransition(.zoom(sourceID: sourceID, in: namespace))
+            navigationTransition(.zoom(sourceID: id, in: namespace))
         } else {
             self
-        }
-    }
-
-    /// Scroll phase tracking arrived in iOS 18. On older systems a simultaneous
-    /// pan gesture reports equivalent interaction start/stop to the preview cache.
-    @ViewBuilder
-    func compatibleScrollActivity(_ callback: @escaping (Bool) -> Void) -> some View {
-        if #available(iOS 18.0, *) {
-            onScrollPhaseChange { _, phase in callback(phase != .idle) }
-        } else {
-            simultaneousGesture(
-                DragGesture(minimumDistance: 4)
-                    .onChanged { _ in callback(true) }
-                    .onEnded { _ in callback(false) }
-            )
         }
     }
 }

@@ -55,7 +55,16 @@ struct FilmLibrarySheet: View {
                     .padding(.bottom, 28)
             }
             .scrollIndicators(.hidden)
-            .compatibleScrollActivity { isScrolling = $0 }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { _ in isScrolling = true }
+                    .onEnded { _ in
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 240_000_000)
+                            isScrolling = false
+                        }
+                    }
+            )
         }
         .task { await refreshPreviews() }
         .task {

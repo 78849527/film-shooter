@@ -38,7 +38,7 @@ struct GalleryView: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: UUID.self) { id in
                 PhotoDetailView(startID: id, currentID: $currentID)
-                    .compatibleNavigationZoom(sourceID: currentID ?? id, namespace: namespace)
+                    .compatibleDetailTransition(id: currentID ?? id, namespace: namespace)
             }
         }
         .overlay { BannerOverlay(topPadding: 8) }
