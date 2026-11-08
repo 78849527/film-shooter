@@ -75,6 +75,14 @@ enum OutputQuality: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// The editing controls follow the user's preferred thumb.
+enum EditorHandedness: String, Codable, CaseIterable, Identifiable {
+    case left, right
+
+    var id: String { rawValue }
+    var title: String { self == .left ? "左手" : "右手" }
+}
+
 /// User preferences, persisted in UserDefaults.
 @MainActor
 final class AppSettings: ObservableObject {
@@ -89,6 +97,9 @@ final class AppSettings: ObservableObject {
     var keepOriginals: Bool { didSet { save(keepOriginals, "keepOriginals"); objectWillChange.send() } }
     var showGrid: Bool { didSet { save(showGrid, "showGrid"); objectWillChange.send() } }
     var frameAspect: FrameAspect { didSet { save(frameAspect.rawValue, "frameAspect"); objectWillChange.send() } }
+    var editorHandedness: EditorHandedness {
+        didSet { save(editorHandedness.rawValue, "editorHandedness"); objectWillChange.send() }
+    }
     var viewfinderGrain: Bool { didSet { save(viewfinderGrain, "viewfinderGrain"); objectWillChange.send() } }
     var haptics: Bool {
         didSet {
@@ -115,6 +126,7 @@ final class AppSettings: ObservableObject {
         keepOriginals = d.object(forKey: "keepOriginals") as? Bool ?? true
         showGrid = d.object(forKey: "showGrid") as? Bool ?? false
         frameAspect = FrameAspect(rawValue: d.string(forKey: "frameAspect") ?? "") ?? .r3x2
+        editorHandedness = EditorHandedness(rawValue: d.string(forKey: "editorHandedness") ?? "") ?? .right
         viewfinderGrain = d.object(forKey: "viewfinderGrain") as? Bool ?? true
         haptics = d.object(forKey: "haptics") as? Bool ?? true
         rollLength = d.object(forKey: "rollLength") as? Int ?? 36

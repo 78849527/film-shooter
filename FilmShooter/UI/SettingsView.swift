@@ -60,6 +60,26 @@ struct SettingsView: View {
                                       systemImage: "circle.dotted", isOn: $settings.viewfinderGrain)
                     }
 
+                    ControlSection(title: "暗房布局", spacing: 14) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("操作习惯")
+                                    .font(AppFont.ui(15, .medium))
+                                    .foregroundStyle(Theme.text)
+                                Text("侧边胶卷与相纸入口靠惯用手，胶片名称在对侧")
+                                    .font(AppFont.ui(12))
+                                    .foregroundStyle(Theme.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            PillSegmented(options: EditorHandedness.allCases,
+                                          selection: $settings.editorHandedness, title: { $0.title })
+                                .frame(width: 134)
+                        }
+                        Text("暗房内可点击画面隐藏控件；横图支持旋转屏幕查看")
+                            .font(AppFont.ui(12))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+
                     ControlSection(title: "胶卷", spacing: 14) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
