@@ -12,7 +12,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 30
     env:
-      IOS_MIN: '18.0'
+      IOS_MIN: '16.5'
     steps:
       - uses: actions/checkout@v4
       - name: Select newest Xcode
