@@ -16,6 +16,11 @@ struct DarkroomWorkspace: View {
     @State private var filmPanelOpen = false
     @State private var chromeHidden = false
     @State private var resetZoomToken = 0
+    /// Docked by default. Long-pressing the panel title unlocks dragging
+    /// without conflicting with the film carousel and slider gestures.
+    @State private var panelFloating = false
+    @State private var floatingOffset: CGSize = .zero
+    @State private var floatingDragStart: CGSize = .zero
 
     private var rightHanded: Bool { settings.editorHandedness == .right }
 
@@ -29,6 +34,7 @@ struct DarkroomWorkspace: View {
                     withAnimation(.easeOut(duration: 0.18)) {
                         if filmPanelOpen {
                             filmPanelOpen = false
+                            resetPanelPosition()
                         } else {
                             chromeHidden.toggle()
                         }
@@ -58,7 +64,7 @@ struct DarkroomWorkspace: View {
 
                     if filmPanelOpen {
                         filmPanel(in: geometry.size)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            .transition(.move(edge: rightHanded ? .trailing : .leading).combined(with: .opacity))
                             .zIndex(3)
                     }
                 }
@@ -86,18 +92,11 @@ struct DarkroomWorkspace: View {
         }
         .preferredColorScheme(.dark)
         .disabled(sent)
+        .compatibleOnChange(of: rightHanded) { _, _ in resetPanelPosition() }
     }
 
     private func topBar(isLandscape: Bool) -> some View {
         HStack(spacing: 12) {
-            Button(action: onBack) {
-                Label("返回", systemImage: "chevron.left")
-                    .font(AppFont.ui(14, .medium))
-                    .foregroundStyle(Theme.text)
-                    .frame(minWidth: 58, minHeight: 42)
-            }
-            .accessibilityLabel("返回并取消暗房编辑")
-
             Spacer()
 
             Button {
@@ -161,29 +160,45 @@ struct DarkroomWorkspace: View {
         .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 9))
     }
 
+    /// Primary controls stay accessible without opening the film panel.
+    /// Return cancels; Share initiates the real full-resolution development.
     private var sideRail: some View {
         HStack(spacing: 0) {
             if rightHanded { Spacer(minLength: 0) }
-            Button {
-                Haptics.selection()
-                withAnimation(.easeOut(duration: 0.20)) { filmPanelOpen = true }
-            } label: {
-                VStack(spacing: 5) {
-                    Image(systemName: "camera.filters")
-                        .font(.system(size: 19))
-                    Text("胶片")
-                        .font(AppFont.ui(11, .semibold))
-                }
-                .foregroundStyle(Theme.text)
-                .frame(width: 52, height: 68)
-                .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 13))
+            VStack(spacing: 8) {
+                railButton(title: "胶片", symbol: "camera.filters", action: {
+                    Haptics.selection()
+                    resetPanelPosition()
+                    withAnimation(.easeOut(duration: 0.24)) { filmPanelOpen = true }
+                })
+                railButton(title: "分享", symbol: "square.and.arrow.up", enabled: editor.canDevelop, action: onShare)
+                railButton(title: "返回", symbol: "chevron.backward", action: onBack)
             }
-            .buttonStyle(.pressable(scale: 0.94))
-            .accessibilityLabel("打开胶片和调整面板")
+            .padding(.horizontal, 5)
+            .padding(.vertical, 7)
+            .background(.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 16))
             .padding(.horizontal, 5)
             if !rightHanded { Spacer(minLength: 0) }
         }
-        .padding(.bottom, 48)
+    }
+
+    private func railButton(title: String, symbol: String, enabled: Bool = true,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: symbol)
+                    .font(.system(size: 17))
+                    .frame(height: 22)
+                Text(title)
+                    .font(AppFont.ui(10, .semibold))
+            }
+            .foregroundStyle(Theme.text.opacity(enabled ? 1 : 0.45))
+            .frame(width: 46, height: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressable(scale: 0.95))
+        .disabled(!enabled || sent)
+        .accessibilityLabel(title == "分享" ? "高清冲印后分享照片" : title)
     }
 
     private var bottomTools: some View {
@@ -210,37 +225,35 @@ struct DarkroomWorkspace: View {
 
     private func filmPanel(in available: CGSize) -> some View {
         let landscape = available.width > available.height
-        // Lower half only, either aligned bottom-left or bottom-right.
-        // Portrait width leaves part of the image visible behind the panel;
-        // landscape uses less than half the horizontal screen width.
+        // Landscape gets a tall panel (86% of the usable height); portrait
+        // keeps the original half-height panel for maximum photo visibility.
         let panelWidth = landscape
-            ? min(390, available.width * 0.48)
+            ? min(400, available.width * 0.46)
             : min(350, available.width * 0.84)
-        let panelHeight = available.height * 0.50
+        let panelHeight = available.height * (landscape ? 0.86 : 0.50)
 
         return ZStack(alignment: rightHanded ? .bottomTrailing : .bottomLeading) {
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    withAnimation(.easeOut(duration: 0.2)) { filmPanelOpen = false }
+                    withAnimation(.easeOut(duration: 0.20)) { filmPanelOpen = false }
+                    resetPanelPosition()
                 }
 
             VStack(spacing: 0) {
                 panelHeader
+                    .contentShape(Rectangle())
+                    .gesture(panelDragGesture(in: available, panelWidth: panelWidth,
+                                              panelHeight: panelHeight))
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 9) {
                         EditorFilmSection(editor: editor)
-                            .padding(.horizontal, 5)
-                        RecipeControls(recipe: $editor.recipe, showsExposure: true)
-                            .padding(.horizontal, 8)
-                        Text("相纸选择会在兼容胶卷间保留")
-                            .font(AppFont.ui(11))
-                            .foregroundStyle(Theme.secondary)
-                            .padding(.horizontal, 10)
-                            .padding(.bottom, 8)
+                            .padding(.horizontal, 3)
+                        RecipeControls(recipe: $editor.recipe, showsExposure: true, compact: true)
+                            .padding(.horizontal, 6)
                     }
-                    .padding(.top, 4)
+                    .padding(.top, 2)
                 }
                 .scrollIndicators(.hidden)
 
@@ -248,24 +261,78 @@ struct DarkroomWorkspace: View {
             }
             .frame(width: panelWidth, height: panelHeight)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17))
-            .background(Theme.surface.opacity(0.60), in: RoundedRectangle(cornerRadius: 17))
+            .background(Theme.surface.opacity(0.48), in: RoundedRectangle(cornerRadius: 17))
             .overlay(RoundedRectangle(cornerRadius: 17)
-                .strokeBorder(.white.opacity(0.16), lineWidth: 1))
+                .strokeBorder(.white.opacity(panelFloating ? 0.32 : 0.15),
+                              lineWidth: panelFloating ? 1.3 : 1))
             .clipShape(RoundedRectangle(cornerRadius: 17))
+            .offset(floatingOffset)
             .padding(.horizontal, 7)
             .padding(.bottom, 7)
         }
         .frame(width: available.width, height: available.height)
     }
 
+    private func resetPanelPosition() {
+        panelFloating = false
+        floatingOffset = .zero
+        floatingDragStart = .zero
+    }
+
+    /// Dragging begins ONLY after a long press on the header. Regular short
+    /// swipes on the stock carousel or sliders are never intercepted.
+    private func panelDragGesture(in available: CGSize, panelWidth: CGFloat,
+                                  panelHeight: CGFloat) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.38)
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .onChanged { phase in
+                switch phase {
+                case .second(true, let drag):
+                    if !panelFloating {
+                        panelFloating = true
+                        floatingDragStart = floatingOffset
+                        Haptics.selection()
+                    }
+                    if let drag {
+                        let proposed = CGSize(
+                            width: floatingDragStart.width + drag.translation.width,
+                            height: floatingDragStart.height + drag.translation.height
+                        )
+                        floatingOffset = constrainedPanelOffset(proposed, in: available,
+                                                                 panelWidth: panelWidth,
+                                                                 panelHeight: panelHeight)
+                    }
+                default:
+                    break
+                }
+            }
+            .onEnded { _ in floatingDragStart = floatingOffset }
+    }
+
+    private func constrainedPanelOffset(_ proposed: CGSize, in available: CGSize,
+                                        panelWidth: CGFloat, panelHeight: CGFloat) -> CGSize {
+        let maxHorizontalTravel = max(0, available.width - panelWidth - 14)
+        let xMin: CGFloat = rightHanded ? -maxHorizontalTravel : 0
+        let xMax: CGFloat = rightHanded ? 0 : maxHorizontalTravel
+        let yMin = -max(0, available.height - panelHeight - 14)
+        return CGSize(width: min(xMax, max(xMin, proposed.width)),
+                      height: min(0, max(yMin, proposed.height)))
+    }
+
     private var panelHeader: some View {
         HStack(spacing: 10) {
-            Label("胶片", systemImage: "camera.filters")
-                .font(AppFont.ui(16, .semibold))
-                .foregroundStyle(Theme.text)
+            VStack(alignment: .leading, spacing: 2) {
+                Label("胶片", systemImage: "camera.filters")
+                    .font(AppFont.ui(14, .semibold))
+                Text(panelFloating ? "拖动位置 · 点击关闭后复位" : "长按标题后拖动悬浮")
+                    .font(AppFont.ui(10))
+                    .foregroundStyle(Theme.secondary)
+            }
+            .foregroundStyle(Theme.text)
             Spacer()
             Button {
                 withAnimation(.easeOut(duration: 0.18)) { filmPanelOpen = false }
+                resetPanelPosition()
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .semibold))
@@ -280,41 +347,24 @@ struct DarkroomWorkspace: View {
         .padding(.vertical, 7)
     }
 
+    /// Inner panel has only the print action; return and share stay in the
+    /// primary side rail so they are available without opening the panel.
     private var panelActions: some View {
-        HStack(spacing: 7) {
-            Button(action: onBack) {
-                Label("返回", systemImage: "arrow.uturn.backward")
-                    .frame(maxWidth: .infinity, minHeight: 40)
-            }
-            .accessibilityLabel("返回并取消编辑")
-            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
-
-            Button(action: onDevelop) {
-                Label("冲洗", systemImage: "drop.fill")
-                    .frame(maxWidth: .infinity, minHeight: 40)
-            }
-            .disabled(!editor.canDevelop || sent)
-            .background(editor.canDevelop ? Theme.accent.opacity(0.35) :
-                        .white.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
-
-            Button(action: onShare) {
-                Label("分享", systemImage: "square.and.arrow.up")
-                    .frame(maxWidth: .infinity, minHeight: 40)
-            }
-            .accessibilityLabel("高清冲洗完成后分享照片")
-            .disabled(!editor.canDevelop || sent)
-            .background(editor.canDevelop ? Theme.accent.opacity(0.45) :
-                        .white.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+        Button(action: onDevelop) {
+            Label("冲印", systemImage: "drop.fill")
+                .font(AppFont.ui(13, .semibold))
+                .foregroundStyle(Theme.text)
+                .frame(maxWidth: .infinity, minHeight: 42)
+                .background(editor.canDevelop ? Theme.accent.opacity(0.36) :
+                            .white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         }
-        .font(AppFont.ui(12, .semibold))
-        .lineLimit(1)
-        .minimumScaleFactor(0.7)
-        .foregroundStyle(Theme.text)
+        .disabled(!editor.canDevelop || sent)
         .buttonStyle(.pressable)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 9)
-        .background(.black.opacity(0.30))
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(.black.opacity(0.23))
     }
+
 }
 
 /// Pinch, pan, double tap and hold-to-compare share a single image transform.
