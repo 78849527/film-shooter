@@ -5,7 +5,7 @@ import UIKit
 /// press and hold to see the original, swipe down (the zoom transition's own
 /// gesture) or the chevron to go back.
 struct PhotoDetailView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     let startID: UUID
@@ -51,7 +51,7 @@ struct PhotoDetailView: View {
         .onAppear {
             ScreenshotMode.log("detail appeared for \(startID), \(model.library.photos.count) photos")
         }
-        .onChange(of: scrolledID) { _, new in
+        .compatibleOnChange(of: scrolledID) { _, new in
             currentID = new
             if isZoomed { isZoomed = false }
         }
@@ -65,7 +65,7 @@ struct PhotoDetailView: View {
         }
         .fullScreenCover(item: $editor) { editor in
             EditorView(editor: editor)
-                .environment(model)
+                .environmentObject(model)
         }
     }
 
@@ -111,7 +111,7 @@ struct PhotoDetailView: View {
             Text("\(index) / \(photos.count)")
                 .font(AppFont.mono(12, .medium))
                 .foregroundStyle(Theme.text.opacity(0.85))
-                .contentTransition(.numericText(value: Double(index)))
+                .compatibleNumericText(Double(index))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(Capsule().fill(Color.black.opacity(0.45)))
@@ -196,7 +196,7 @@ struct PhotoDetailView: View {
                 } else {
                     Image(systemName: symbol)
                         .font(.system(size: 18, weight: .regular))
-                        .contentTransition(.symbolEffect(.replace))
+                        .compatibleSymbolReplacement()
                 }
             }
             .frame(height: 22)
@@ -249,7 +249,7 @@ struct PhotoDetailView: View {
 /// One zoomable print: the cached thumbnail at once, cross-fading to the
 /// screen-resolution decode; the original while held.
 struct PhotoPage: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     let photo: DevelopedPhoto
     @Binding var isZoomed: Bool
     let onTap: () -> Void
@@ -311,7 +311,7 @@ struct PhotoPage: View {
             guard !Task.isCancelled else { return }
             full = image
         }
-        .onChange(of: holding) { _, isHolding in
+        .compatibleOnChange(of: holding) { _, isHolding in
             guard isHolding else { return }
             Haptics.softTap(0.5)
             if original == nil { loadOriginal() }

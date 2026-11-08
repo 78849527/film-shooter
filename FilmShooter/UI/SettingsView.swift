@@ -7,7 +7,7 @@ enum SettingsRoute: Hashable {
 }
 
 struct SettingsView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     /// The navigation path. Initialised with About when asked to open there,
@@ -20,7 +20,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        @Bindable var settings = model.settings
+        @ObservedObject var settings = model.settings
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(spacing: 22) {
@@ -68,7 +68,7 @@ struct SettingsView: View {
                                 Text("当前拍到第 \(String(model.frameNumber)) 张")
                                     .font(AppFont.ui(12))
                                     .foregroundStyle(Theme.secondary)
-                                    .contentTransition(.numericText(value: Double(model.frameNumber)))
+                                    .compatibleNumericText(Double(model.frameNumber))
                             }
                             Spacer()
                             PillSegmented(options: [24, 36], selection: $settings.rollLength,
@@ -159,7 +159,7 @@ struct SettingsView: View {
         .onAppear {
             ScreenshotMode.log("settings appeared, path \(path.count)")
         }
-        .onChange(of: path) { old, new in
+        .compatibleOnChange(of: path) { old, new in
             ScreenshotMode.log("settings path \(old.count) -> \(new.count)")
         }
         .tint(Theme.accent)

@@ -24,7 +24,7 @@ enum FilmLibraryFilter: Hashable {
 /// "胶片库": every stock as a card with a live preview of the current scene
 /// through that film, favourites, and a filter bar.
 struct FilmLibrarySheet: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var filter: FilmLibraryFilter
@@ -383,7 +383,7 @@ struct FilmLibraryCard: View {
             Image(systemName: isFavorite ? "star.fill" : "star")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(isFavorite ? Theme.accent : Color.white.opacity(0.85))
-                .symbolEffect(.bounce, value: isFavorite)
+                .compatibleSymbolBounce(value: isFavorite)
                 .frame(width: 26, height: 26)
                 .background(Circle().fill(Color.black.opacity(0.42)))
                 .frame(width: 36, height: 36)

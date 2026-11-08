@@ -6,11 +6,11 @@ import UIKit
 /// on the table; the film chooser is pinned under it and only the print
 /// controls scroll.
 struct EditorView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @Bindable var editor: EditorModel
+    @ObservedObject var editor: EditorModel
 
     @GestureState private var showingOriginal = false
     @State private var sent = false
@@ -150,7 +150,7 @@ struct EditorView: View {
         .animation(.easeOut(duration: 0.35), value: editor.isLoading)
         .animation(.easeOut(duration: 0.14), value: showingOriginal)
         .animation(Motion.fade, value: editor.error)
-        .onChange(of: showingOriginal) { _, on in if on { Haptics.softTap(0.4) } }
+        .compatibleOnChange(of: showingOriginal) { _, on in if on { Haptics.softTap(0.4) } }
     }
 
     /// The preview as a print: its own aspect, small rounded corners, and a
@@ -326,11 +326,7 @@ struct DevelopingLoader: View {
                     Circle()
                         .fill(Theme.lcd)
                         .frame(width: 6, height: 6)
-                        .phaseAnimator([0.3, 1.0]) { content, phase in
-                            content.opacity(phase)
-                        } animation: { _ in
-                            .easeInOut(duration: 0.7)
-                        }
+                        .compatiblePulse([0.3, 1.0], duration: 0.7)
                     Text("显影中…")
                         .font(AppFont.ui(13, .medium))
                         .foregroundStyle(Theme.text.opacity(0.85))

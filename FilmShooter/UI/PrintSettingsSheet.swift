@@ -146,13 +146,13 @@ struct PaperPicker: View {
 /// "冲印": how the camera's frames are developed and printed. Edits go
 /// straight to `model.recipe`; the viewfinder re-bakes once a slider is let go.
 struct PrintSettingsSheet: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     private static let compact = PresentationDetent.height(360)
 
     var body: some View {
-        @Bindable var model = model
+        @ObservedObject var model = model
         VStack(spacing: 0) {
             header
             ScrollView {

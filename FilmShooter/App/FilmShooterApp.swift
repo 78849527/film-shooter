@@ -2,12 +2,12 @@ import SwiftUI
 
 @main
 struct FilmShooterApp: App {
-    @State private var model = AppModel()
+    @StateObject private var model = AppModel()
 
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environment(model)
+                .environmentObject(model)
                 .preferredColorScheme(.dark)
                 .statusBarHidden()
                 .tint(Theme.accent)
@@ -18,7 +18,7 @@ struct FilmShooterApp: App {
 /// Starts the engine and the camera, follows the scene phase, and shows the
 /// launch splash until the engine is ready (at most ~1 s).
 struct RootView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var showSplash = !ScreenshotMode.isActive
@@ -35,11 +35,11 @@ struct RootView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .task { await launch() }
-        .onChange(of: scenePhase) { _, phase in
+        .compatibleOnChange(of: scenePhase) { _, phase in
             guard launched else { return }
             model.setActive(phase == .active)
         }
-        .onChange(of: model.settings.haptics, initial: true) { _, enabled in
+        .compatibleOnChange(of: model.settings.haptics, initial: true) { _, enabled in
             Haptics.isEnabled = enabled
         }
     }

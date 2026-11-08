@@ -38,7 +38,7 @@ struct TopBar: View {
 
 /// Off -> auto -> on, with a symbol replace transition. Hidden without a flash.
 struct FlashButton: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
 
     var body: some View {
         let camera = model.camera
@@ -51,7 +51,7 @@ struct FlashButton: View {
                     Image(systemName: Self.symbol(camera.flashMode))
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(camera.flashMode == .off ? Theme.text : Theme.accent)
-                        .contentTransition(.symbolEffect(.replace))
+                        .compatibleSymbolReplacement()
                         .frame(width: 36, height: 36)
                         .background(Circle().fill(Theme.surface))
                         .overlay(Circle().strokeBorder(Theme.hairline, lineWidth: 1))
@@ -97,7 +97,7 @@ struct FlashButton: View {
 
 /// Shows the current frame aspect; opens the aspect picker.
 struct AspectButton: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Binding var isOpen: Bool
 
     var body: some View {
@@ -128,7 +128,7 @@ struct AspectButton: View {
 /// A 36 pt capsule like the aspect button: amber when RAW is on; when off,
 /// secondary text with a diagonal slash.
 struct RAWButton: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
 
     var body: some View {
         let camera = model.camera
@@ -170,7 +170,7 @@ struct RAWButton: View {
 
 /// The analog frame counter: LCD digits and "/36" on a 36 pt black plate.
 struct FrameCounter: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
 
     var body: some View {
         let n = model.frameNumber
@@ -178,7 +178,7 @@ struct FrameCounter: View {
         HStack(alignment: .firstTextBaseline, spacing: 1) {
             Text(String(format: "%02ld", n))
                 .lcdText(20)
-                .contentTransition(.numericText(value: Double(n)))
+                .compatibleNumericText(Double(n))
             Text("/\(total)")
                 .lcdText(11, color: Theme.lcd.opacity(0.5), glow: false)
         }
@@ -195,7 +195,7 @@ struct FrameCounter: View {
 // MARK: - Aspect picker
 
 struct AspectPickerPanel: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     let close: () -> Void
 
     var body: some View {
@@ -290,7 +290,7 @@ struct ControlDeck: View {
 /// negative turning positive, traced by a progress line, with a count badge.
 /// Long-press for "导入照片冲洗".
 struct GalleryButton: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     let namespace: Namespace.ID
     let action: () -> Void
     let importPhoto: () -> Void
@@ -332,18 +332,14 @@ struct GalleryButton: View {
             .overlay(alignment: .topTrailing) {
                 badge(count: darkroom.pendingCount, failed: hasFailed)
             }
-            .phaseAnimator([1.0, 1.1, 1.0], trigger: darkroom.completedCount) { content, scale in
-                content.scaleEffect(scale)
-            } animation: { _ in
-                .spring(response: 0.26, dampingFraction: 0.6)
-            }
+            .compatibleBadgePulse(trigger: darkroom.completedCount)
             .animation(.easeInOut(duration: 0.45), value: active?.id)
             .animation(.easeInOut(duration: 0.45), value: last?.thumbName)
             .uprightWithDevice()
             .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
-        .matchedTransitionSource(id: "gallery", in: namespace)
+        .compatibleMatchedTransitionSource(id: "gallery", in: namespace)
         .contextMenu {
             Button(action: action) {
                 Label("打开底片册", systemImage: "photo.on.rectangle")
@@ -352,7 +348,7 @@ struct GalleryButton: View {
                 Label("导入照片冲洗", systemImage: "photo.badge.plus")
             }
         }
-        .onChange(of: darkroom.completedCount) { _, _ in Haptics.softTap(0.7) }
+        .compatibleOnChange(of: darkroom.completedCount) { _, _ in Haptics.softTap(0.7) }
         .accessibilityLabel(Text("底片册"))
         .accessibilityHint(Text("长按可导入照片冲洗"))
     }
@@ -371,7 +367,7 @@ struct GalleryButton: View {
                 Text("\(count)")
                     .font(AppFont.mono(10, .bold))
                     .foregroundStyle(Theme.background)
-                    .contentTransition(.numericText(value: Double(count)))
+                    .compatibleNumericText(Double(count))
                     .padding(.horizontal, 5)
                     .frame(minWidth: 18, minHeight: 18)
                     .background(Capsule().fill(Theme.accent))
@@ -389,7 +385,7 @@ struct GalleryButton: View {
 /// A chrome release button inside an advance ring: the ring's fine ticks turn
 /// one notch per frame; only the disc sinks under the thumb.
 struct ShutterButton: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var notch = 0
 
@@ -405,7 +401,7 @@ struct ShutterButton: View {
         }
         .buttonStyle(ShutterButtonStyle(isLive: live, isBusy: busy, notch: notch))
         .disabled(!live)
-        .onChange(of: model.frameNumber) { _, _ in
+        .compatibleOnChange(of: model.frameNumber) { _, _ in
             // Always forward, also when the roll wraps to 1.
             if !reduceMotion { notch += 1 }
         }
@@ -471,7 +467,7 @@ struct ShutterButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         ShutterFace(isLive: isLive, isDown: configuration.isPressed || isBusy, notch: notch)
-            .onChange(of: configuration.isPressed) { _, pressed in
+            .compatibleOnChange(of: configuration.isPressed) { _, pressed in
                 if pressed { Haptics.softTap(0.55) }
             }
     }
@@ -481,7 +477,7 @@ struct ShutterButtonStyle: ButtonStyle {
 
 /// Front/back with a 3D flip of the icon.
 struct FlipButton: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var turns: Double = 0
 
@@ -518,7 +514,7 @@ struct FlipButton: View {
 /// editor (`onEditor`). Shared by the gallery header and the gallery button.
 @MainActor
 struct PhotoImporter: ViewModifier {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Binding var isPresented: Bool
     let onEditor: (EditorModel) -> Void
 
@@ -528,7 +524,7 @@ struct PhotoImporter: ViewModifier {
         content
             .photosPicker(isPresented: $isPresented, selection: $item, matching: .images,
                           preferredItemEncoding: .current)
-            .onChange(of: item) { _, newItem in
+            .compatibleOnChange(of: item) { _, newItem in
                 guard let newItem else { return }
                 load(newItem)
             }
