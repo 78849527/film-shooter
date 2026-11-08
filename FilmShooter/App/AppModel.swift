@@ -60,6 +60,7 @@ final class AppModel: ObservableObject {
     private var lutTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
     private var childSubscriptions = Set<AnyCancellable>()
+    private var photoEditingCount = 0
 
     var film: FilmStock { FilmCatalog.film(filmID) }
     var paper: PrintPaper? { film.kind.usesPrintPaper ? FilmCatalog.paper(recipe.resolvedPaperID) : nil }
@@ -91,8 +92,10 @@ final class AppModel: ObservableObject {
         filmID = initial.filmID
         frameNumber = max(1, UserDefaults.standard.integer(forKey: "frameNumber"))
         lut = luts.cached(for: recipe)
-        let darkroom = self.darkroom
-        luts.shouldPause = { darkroom.isBusy }
+        luts.shouldPause = { [weak self] in
+            guard let self else { return false }
+            return self.darkroom.isBusy || self.photoEditingCount > 0
+        }
         // iOS 16's environment object observes AppModel. Forward nested model updates.
         for publisher in [settings.objectWillChange.eraseToAnyPublisher(),
                           library.objectWillChange.eraseToAnyPublisher(),
@@ -132,6 +135,18 @@ final class AppModel: ObservableObject {
             luts.cancelPrebake()
             persistRecipe()
         }
+    }
+
+    // MARK: darkroom engine priority
+
+    func beginPhotoEditing() {
+        photoEditingCount += 1
+        // Stop scheduling LUT bakes that would queue in front of the edit.
+        luts.cancelPrebake()
+    }
+
+    func endPhotoEditing() {
+        photoEditingCount = max(0, photoEditingCount - 1)
     }
 
     // MARK: film

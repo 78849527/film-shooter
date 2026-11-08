@@ -15,14 +15,13 @@ final class EditorModel: ObservableObject, Identifiable {
     let id = UUID()
     let source: Source
 
-    // A @Published property emits objectWillChange from willSet, before its
-    // actual storage changes. The iOS 16 SwiftUI binding can then redraw
-    // against the previous film / toggle value. Emit after the new recipe
-    // has been stored, so UI and rendering share the same generation.
-    var recipe: DevelopRecipe {
+    // Standard Combine publishing is required for iOS 16's @ObservedObject:
+    // the explicit didSet objectWillChange from previous ports notified
+    // after the update and could leave SwiftUI one change behind.
+    @Published var recipe: DevelopRecipe {
         didSet {
             guard recipe != oldValue else { return }
-            objectWillChange.send()
+            revision &+= 1
             // Auto exposure, grain and halation act on the negative, not the
             // print. Prioritise the latest adjustment instead of waiting for
             // a now-obsolete GPU render to finish.
@@ -36,19 +35,25 @@ final class EditorModel: ObservableObject, Identifiable {
         }
     }
 
-    /// The latest rendered print (screen size).
-    @Published private(set) var preview: UIImage?
-    /// Exact film + paper + texture recipe used to produce the image above.
-    /// The selection UI may update immediately while its render is in flight.
-    @Published private(set) var previewRecipe: DevelopRecipe?
+    /// Image and the recipe that actually produced it are a SINGLE published
+    /// value. Publishing previewRecipe separately before preview previously
+    /// let SwiftUI label the old image as belonging to the next film.
+    struct RenderedPreview {
+        let image: UIImage
+        let recipe: DevelopRecipe
+        let elapsedMS: Double
+        let revision: UInt64
+    }
+    @Published private(set) var renderedPreview: RenderedPreview?
+    var preview: UIImage? { renderedPreview?.image }
+    var previewRecipe: DevelopRecipe? { renderedPreview?.recipe }
+    var lastRenderMS: Double { renderedPreview?.elapsedMS ?? 0 }
+
     /// The photo as it came in, for press-and-hold comparison.
     @Published private(set) var original: UIImage?
     @Published private(set) var isLoading = true
     @Published private(set) var isRendering = false
     @Published private(set) var error: String?
-    /// Render time of the last preview, ms.
-    @Published private(set) var lastRenderMS: Double = 0
-
     var film: FilmStock { recipe.film }
 
     /// Commit the new film and its default paper with one recipe write.
@@ -59,7 +64,10 @@ final class EditorModel: ObservableObject, Identifiable {
         recipe = updated
     }
 
-    var previewMatchesSelection: Bool { preview != nil && previewRecipe == recipe }
+    var previewMatchesSelection: Bool {
+        guard let frame = renderedPreview else { return false }
+        return frame.revision == revision && frame.recipe == recipe
+    }
     // Do not let a render request be exported before its film + paper have
     // actually appeared in the preview the user approved.
     var canDevelop: Bool { error == nil && !isLoading && !isRendering && previewMatchesSelection }
@@ -67,6 +75,9 @@ final class EditorModel: ObservableObject, Identifiable {
     private var session: EditSession?
     private var isClosed = false
     private var renderTask: Task<Void, Never>?
+    /// Incremented on every edit. Handles A→B→A changes that otherwise
+    /// let an old A render be incorrectly accepted as the latest A.
+    private var revision: UInt64 = 0
     private var pending = false
     private let quality: Int
     private var captureDate: Date?
@@ -85,8 +96,7 @@ final class EditorModel: ObservableObject, Identifiable {
         renderTask?.cancel()
         isLoading = true
         error = nil
-        preview = nil
-        previewRecipe = nil
+        renderedPreview = nil
         do {
             let data: Data
             let isRAW: Bool
@@ -156,19 +166,26 @@ final class EditorModel: ObservableObject, Identifiable {
         repeat {
             pending = false
             let wanted = recipe
+            let requestRevision = revision
             do {
                 let img = try await session.preview(recipe: wanted)
-                lastRenderMS = img.elapsedMS
-                if !pending && wanted == recipe {
-                    previewRecipe = wanted
-                    preview = UIImage(cgImage: img.cgImage)
+                if !pending && requestRevision == revision && wanted == recipe {
+                    // Commit the render + all metadata atomically.
+                    // A view can never observe B's label over A's pixels.
+                    renderedPreview = RenderedPreview(
+                        image: UIImage(cgImage: img.cgImage),
+                        recipe: wanted,
+                        elapsedMS: img.elapsedMS,
+                        revision: requestRevision
+                    )
                     error = nil
                 }
             } catch {
-                // A cancelled/obsolete render is not an error for the new film.
-                if !pending && wanted == recipe { self.error = error.localizedDescription }
+                if !pending && requestRevision == revision && wanted == recipe {
+                    self.error = error.localizedDescription
+                }
             }
-            if wanted != recipe { pending = true }
+            if requestRevision != revision || wanted != recipe { pending = true }
         } while pending && !isClosed
         isRendering = false
     }

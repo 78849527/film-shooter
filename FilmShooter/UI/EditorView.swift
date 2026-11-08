@@ -15,6 +15,7 @@ struct EditorView: View {
     @GestureState private var showingOriginal = false
     @State private var sent = false
     @State private var showHint = true
+    @State private var editingPriorityActive = false
 
     var body: some View {
         GeometryReader { geo in
@@ -32,12 +33,26 @@ struct EditorView: View {
             }
         }
         .background(Theme.background.ignoresSafeArea())
-        .task { await editor.load(library: model.library) }
+        .task {
+            // LUT prebaking and the photo editor share a serial GPU queue.
+            // Give the user's chosen film priority over background tables.
+            if !editingPriorityActive {
+                editingPriorityActive = true
+                model.beginPhotoEditing()
+            }
+            await editor.load(library: model.library)
+        }
         .task {
             try? await Task.sleep(nanoseconds: 3_500_000_000)
             withAnimation(.easeOut(duration: 0.5)) { showHint = false }
         }
-        .onDisappear { editor.close() }
+        .onDisappear {
+            editor.close()
+            if editingPriorityActive {
+                editingPriorityActive = false
+                model.endPhotoEditing()
+            }
+        }
     }
 
     // MARK: header
@@ -160,7 +175,22 @@ struct EditorView: View {
         let corner = RoundedRectangle(cornerRadius: 4, style: .continuous)
         return ZStack {
             Color.black
-            CrossfadeImage(image: editor.preview, duration: 0.18)
+            if editor.previewMatchesSelection, let image = editor.preview {
+                // Display the exact completed image, without a second
+                // CrossfadeImage state machine retaining the PREVIOUS frame.
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+            } else if let original = editor.original {
+                // While the engine works, show a visibly neutral placeholder,
+                // never a previous film with the new film's name.
+                Image(uiImage: original)
+                    .resizable()
+                    .scaledToFit()
+                    .blur(radius: 5)
+                    .opacity(0.45)
+            }
             if showingOriginal, let original = editor.original {
                 ZStack {
                     Color.black
@@ -174,11 +204,12 @@ struct EditorView: View {
         .aspectRatio(aspect, contentMode: .fit)
         .clipShape(corner)
         .overlay(alignment: .center) {
-            if !editor.isLoading && editor.preview != nil && !editor.previewMatchesSelection {
+            if !editor.isLoading && !editor.previewMatchesSelection && editor.error == nil {
                 VStack(spacing: 7) {
                     ProgressView()
                         .tint(Theme.accent)
-                    Text("正在匹配胶卷与相纸")
+                    Text("正在显影：\(editor.recipe.film.name)")
+                        .lineLimit(1)
                         .font(AppFont.ui(12, .medium))
                         .foregroundStyle(Theme.text)
                 }
