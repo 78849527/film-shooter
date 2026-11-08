@@ -292,8 +292,9 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
 
             HStack(spacing: 10) {
                 leading()
-                if groupedByKind {
-                    DarkroomKindChips(current: visibleKind, compact: style == .compact) { kind in
+                Group {
+                    if groupedByKind {
+                        DarkroomKindChips(current: visibleKind, compact: style == .compact) { kind in
                         guard visibleKind != kind else { return }
                         visibleKind = kind
                         if let kind, let first = FilmCatalog.films(of: kind).first {
@@ -315,6 +316,7 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
                             jump(to: first.id, haptic: true, commit: true)
                         }
                     }
+                }
                 }
                 .frame(maxWidth: .infinity)
                 if style == .hero {
