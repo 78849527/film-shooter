@@ -55,9 +55,7 @@ struct FilmLibrarySheet: View {
                     .padding(.bottom, 28)
             }
             .scrollIndicators(.hidden)
-            .onScrollPhaseChange { _, phase in
-                isScrolling = phase != .idle
-            }
+            .compatibleScrollActivity { isScrolling = $0 }
         }
         .task { await refreshPreviews() }
         .task {

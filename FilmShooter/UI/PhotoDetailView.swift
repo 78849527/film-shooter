@@ -356,9 +356,9 @@ struct PhotoPage: View {
     }
 
     private func magnifyGesture(container: CGSize, fitted: CGSize) -> some Gesture {
-        MagnifyGesture()
+        MagnificationGesture()
             .onChanged { value in
-                scale = LayoutMath.clamp(baseScale * value.magnification, 0.85, 5)
+                scale = LayoutMath.clamp(baseScale * value, 0.85, 5)
                 setZoomed(scale > 1.01)
             }
             .onEnded { _ in

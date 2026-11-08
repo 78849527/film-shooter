@@ -744,14 +744,16 @@ private final class CaptureController: @unchecked Sendable {
         if photoOutput.isAppleProRAWSupported, photoOutput.isAppleProRAWEnabled != wantsRAW {
             photoOutput.isAppleProRAWEnabled = wantsRAW
         }
-        if photoOutput.isZeroShutterLagSupported, !photoOutput.isZeroShutterLagEnabled {
-            photoOutput.isZeroShutterLagEnabled = true
-        }
-        if photoOutput.isResponsiveCaptureSupported, !photoOutput.isResponsiveCaptureEnabled {
-            photoOutput.isResponsiveCaptureEnabled = true
-        }
-        if photoOutput.isFastCapturePrioritizationSupported, !photoOutput.isFastCapturePrioritizationEnabled {
-            photoOutput.isFastCapturePrioritizationEnabled = true
+        if #available(iOS 17.0, *) {
+            if photoOutput.isZeroShutterLagSupported, !photoOutput.isZeroShutterLagEnabled {
+                photoOutput.isZeroShutterLagEnabled = true
+            }
+            if photoOutput.isResponsiveCaptureSupported, !photoOutput.isResponsiveCaptureEnabled {
+                photoOutput.isResponsiveCaptureEnabled = true
+            }
+            if photoOutput.isFastCapturePrioritizationSupported, !photoOutput.isFastCapturePrioritizationEnabled {
+                photoOutput.isFastCapturePrioritizationEnabled = true
+            }
         }
         if photoOutput.isContentAwareDistortionCorrectionSupported, !photoOutput.isContentAwareDistortionCorrectionEnabled {
             photoOutput.isContentAwareDistortionCorrectionEnabled = true

@@ -38,7 +38,7 @@ struct GalleryView: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: UUID.self) { id in
                 PhotoDetailView(startID: id, currentID: $currentID)
-                    .navigationTransition(.zoom(sourceID: currentID ?? id, in: namespace))
+                    .compatibleNavigationZoom(sourceID: currentID ?? id, namespace: namespace)
             }
         }
         .overlay { BannerOverlay(topPadding: 8) }
@@ -395,7 +395,7 @@ struct FilmStripArt: View {
                 context.stroke(frame, with: .color(Theme.accent.opacity(0.18)), lineWidth: 0.6)
             }
             context.draw(Text("FILMSHOOTER  135").font(.system(size: 6, weight: .bold, design: .monospaced))
-                            .foregroundStyle(Theme.accent.opacity(0.55)),
+                            .foregroundColor(Theme.accent.opacity(0.55)),
                          at: CGPoint(x: size.width * 0.28, y: rail / 2 + 0.5))
         }
     }

@@ -227,7 +227,7 @@ struct ViewfinderPanel: View {
     }
 
     private var magnifyGesture: some Gesture {
-        MagnifyGesture()
+        MagnificationGesture()
             .onChanged { value in
                 let camera = model.camera
                 if !pinching {
@@ -235,7 +235,7 @@ struct ViewfinderPanel: View {
                     pinchSeen = true
                     camera.beginPinch()
                 }
-                camera.updatePinch(scale: value.magnification)
+                camera.updatePinch(scale: value)
             }
             .onEnded { _ in
                 pinching = false
@@ -675,7 +675,7 @@ struct ZoomDial: View {
                 context.stroke(p, with: .color(Color.white.opacity(0.9)), lineWidth: 1.5)
                 context.draw(Text(labels[i])
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.white.opacity(0.9)),
+                                .foregroundColor(Color.white.opacity(0.9)),
                              at: CGPoint(x: x, y: size.height * 0.3))
             }
             var needle = Path()
