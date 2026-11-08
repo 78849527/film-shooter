@@ -61,6 +61,9 @@ final class AppModel: ObservableObject {
     private var persistTask: Task<Void, Never>?
     private var childSubscriptions = Set<AnyCancellable>()
     private var photoEditingCount = 0
+    /// Startup editor does not activate the camera until the user actually
+    /// leaves the photo picker/editor and returns to camera mode.
+    private var cameraSessionEnabled = true
 
     var film: FilmStock { FilmCatalog.film(filmID) }
     var paper: PrintPaper? { film.kind.usesPrintPaper ? FilmCatalog.paper(recipe.resolvedPaperID) : nil }
@@ -83,6 +86,7 @@ final class AppModel: ObservableObject {
         self.library = library
         self.camera = CameraService()
         self.darkroom = Darkroom(library: library, settings: settings)
+        cameraSessionEnabled = settings.startupDestination == .camera
         var initial = DevelopRecipe()
         if let data = UserDefaults.standard.data(forKey: "recipe"),
            let r = try? JSONDecoder().decode(DevelopRecipe.self, from: data) {
@@ -129,12 +133,21 @@ final class AppModel: ObservableObject {
     func setActive(_ active: Bool) {
         darkroom.setForeground(active)
         if active {
-            Task { await camera.start() }
+            if cameraSessionEnabled {
+                Task { await camera.start() }
+            }
         } else {
             camera.stop()
             luts.cancelPrebake()
             persistRecipe()
         }
+    }
+
+    /// Called after dismissing the startup photo picker or exiting darkroom.
+    /// Once enabled, normal camera foreground/background behavior resumes.
+    func enterCameraMode() {
+        cameraSessionEnabled = true
+        Task { await camera.start() }
     }
 
     // MARK: darkroom engine priority

@@ -114,7 +114,7 @@ struct CameraScreen: View {
         .compatibleOnChange(of: showStartupImporter) { wasOpen, isOpen in
             // If the user cancelled the picker, show the normal live camera.
             guard wasOpen, !isOpen, editor == nil else { return }
-            Task { await model.camera.start() }
+            model.enterCameraMode()
         }
     }
 
@@ -153,7 +153,7 @@ struct CameraScreen: View {
                 if editor != nil { model.camera.stop() }
             }
         } else {
-            Task { await model.camera.start() }
+            model.enterCameraMode()
         }
     }
 
