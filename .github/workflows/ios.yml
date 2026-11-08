@@ -8,7 +8,7 @@ name: iOS IPA
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'fix/ios16-5-1-compat']
     paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
@@ -24,7 +24,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     env:
-      IOS_MIN: '18.0'
+      IOS_MIN: '16.5'
     steps:
       - uses: actions/checkout@v4
 
@@ -76,6 +76,9 @@ jobs:
         run: |
           APP=build/DerivedData/Build/Products/Release-iphoneos/FilmShooter.app
           test -d "$APP"
+          MIN=$(plutil -extract MinimumOSVersion raw - < "$APP/Info.plist")
+          echo "Shipped MinimumOSVersion: $MIN"
+          test "$MIN" = "16.5" || { echo "::error::IPA minimum iOS is not 16.5"; exit 1; }
           rm -rf build/ipa && mkdir -p build/ipa/Payload
           cp -R "$APP" build/ipa/Payload/
           (cd build/ipa && zip -qry ../FilmShooter-unsigned.ipa Payload)
