@@ -19,6 +19,7 @@ struct FilmSlider: View {
     var format: (Double) -> String = FilmSlider.signed
     /// Called with true when a drag starts and false when it ends.
     var onEditingChanged: (Bool) -> Void = { _ in }
+    var compact: Bool = false
 
     @State private var isDragging = false
     @State private var startValue: Double = 0
@@ -29,30 +30,30 @@ struct FilmSlider: View {
     private var isAtDefault: Bool { abs(value - defaultValue) < span * 0.002 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: compact ? 2 : 4) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
-                    .font(AppFont.ui(15, .medium))
+                    .font(AppFont.ui(compact ? 12 : 15, .medium))
                     .foregroundStyle(Theme.text)
                 Spacer()
                 Text(format(value))
-                    .font(AppFont.mono(12))
+                    .font(AppFont.mono(compact ? 10 : 12))
                     .monospacedDigit()
                     .foregroundStyle(isAtDefault ? Theme.secondary : Theme.text)
                     .animation(Motion.fade, value: isAtDefault)
             }
-            HStack(spacing: 10) {
+            HStack(spacing: compact ? 5 : 10) {
                 if let leadingLabel {
                     Text(leadingLabel)
-                        .font(AppFont.ui(11))
+                        .font(AppFont.ui(compact ? 10 : 11))
                         .foregroundStyle(Theme.tertiary)
                         .fixedSize()
                 }
                 track
-                    .frame(height: 26)
+                    .frame(height: compact ? 23 : 26)
                 if let trailingLabel {
                     Text(trailingLabel)
-                        .font(AppFont.ui(11))
+                        .font(AppFont.ui(compact ? 10 : 11))
                         .foregroundStyle(Theme.tertiary)
                         .fixedSize()
                 }
@@ -281,27 +282,28 @@ struct ControlSection<Content: View>: View {
     let title: String
     var trailing: String? = nil
     var spacing: CGFloat = 16
+    var compact: Bool = false
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: compact ? 4 : 8) {
             HStack {
                 Text(title)
-                    .font(AppFont.ui(13, .medium))
+                    .font(AppFont.ui(compact ? 11 : 13, .medium))
                     .foregroundStyle(Theme.secondary)
                 Spacer()
                 if let trailing {
                     Text(trailing)
-                        .font(AppFont.ui(11))
+                        .font(AppFont.ui(compact ? 10 : 11))
                         .foregroundStyle(Theme.tertiary)
                 }
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, compact ? 2 : 4)
             VStack(alignment: .leading, spacing: spacing) {
                 content()
             }
-            .padding(14)
-            .surfaceCard(radius: 18)
+            .padding(compact ? 9 : 14)
+            .surfaceCard(radius: compact ? 12 : 18)
         }
     }
 }
