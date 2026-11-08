@@ -199,16 +199,17 @@ final class EditorModel: ObservableObject, Identifiable {
     }
 
     /// Hand the photo to the darkroom for a full-resolution development.
-    func develop(into darkroom: Darkroom, frameNumber: Int) {
+    @discardableResult
+    func develop(into darkroom: Darkroom, frameNumber: Int) -> UUID {
         let r = recipe
         close()
         switch source {
         case .imported(let data, let isRAW):
-            darkroom.enqueue(.imported(data: data, isRAW: isRAW), recipe: r, aspect: nil,
-                             frameNumber: frameNumber, captureDate: captureDate ?? Date())
+            return darkroom.enqueue(.imported(data: data, isRAW: isRAW), recipe: r, aspect: nil,
+                                    frameNumber: frameNumber, captureDate: captureDate ?? Date())
         case .existing(let p):
-            darkroom.enqueue(.redevelop(p), recipe: r, aspect: p.cropAspect, frameNumber: p.frameNumber,
-                             captureDate: p.captureDate)
+            return darkroom.enqueue(.redevelop(p), recipe: r, aspect: p.cropAspect,
+                                    frameNumber: p.frameNumber, captureDate: p.captureDate)
         }
     }
 }
