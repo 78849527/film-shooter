@@ -16,7 +16,19 @@ final class EditorModel: ObservableObject, Identifiable {
     let source: Source
 
     @Published var recipe: DevelopRecipe {
-        didSet { if recipe != oldValue { scheduleRender(filmChanged: recipe.filmID != oldValue.filmID) } }
+        didSet {
+            guard recipe != oldValue else { return }
+            // Auto exposure, grain and halation act on the negative, not the
+            // print. Prioritise the latest adjustment instead of waiting for
+            // a now-obsolete GPU render to finish.
+            let shootChanged = recipe.filmID != oldValue.filmID
+                || recipe.autoExposure != oldValue.autoExposure
+                || recipe.exposureEV != oldValue.exposureEV
+                || recipe.grain != oldValue.grain
+                || recipe.halation != oldValue.halation
+                || recipe.format != oldValue.format
+            scheduleRender(shootChanged: shootChanged)
+        }
     }
 
     /// The latest rendered print (screen size).
@@ -50,8 +62,10 @@ final class EditorModel: ObservableObject, Identifiable {
 
     /// Decode the photo, open it in the engine and render the first print.
     func load(library: PhotoLibrary) async {
+        renderTask?.cancel()
         isLoading = true
         error = nil
+        preview = nil
         do {
             let data: Data
             let isRAW: Bool
@@ -85,25 +99,31 @@ final class EditorModel: ObservableObject, Identifiable {
             // Dismissed while loading: release the engine session right away.
             if isClosed { opened.close(); return }
             session = opened
-            isLoading = false
+            // Keep the developing loader until a real preview has been
+            // produced. Showing the empty UIImage slot here looked like a
+            // black image until the user moved a slider.
             await renderNow()
+            isLoading = false
         } catch {
             isLoading = false
             self.error = error.localizedDescription
         }
     }
 
-    private func scheduleRender(filmChanged: Bool) {
+    private func scheduleRender(shootChanged: Bool) {
         guard session != nil else { return }
         if isRendering {
             pending = true
-            if filmChanged { session?.cancelInFlight() }
+            // On/off metering and film textures must re-expose the negative.
+            // Cancel the stale frame (supported by the engine) so the latest
+            // recipe can render as soon as possible.
+            if shootChanged { session?.cancelInFlight() }
             return
         }
         renderTask?.cancel()
         renderTask = Task { [weak self] in
-            // Short debounce: slider drags coalesce, taps feel immediate.
-            try? await Task.sleep(nanoseconds: filmChanged ? 60_000_000 : 30_000_000)
+            // Coalesce slider writes; a toggle responds on the next UI tick.
+            try? await Task.sleep(nanoseconds: shootChanged ? 20_000_000 : 30_000_000)
             guard !Task.isCancelled else { return }
             await self?.renderNow()
         }

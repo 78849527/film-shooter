@@ -374,6 +374,9 @@ final class EditSession: @unchecked Sendable {
     /// Engine-queue state.
     private var closed = false
     private var params: [String: Any]
+    /// First display of each tier must develop its negative, not reprint a
+    /// session that has never completed a film render.
+    private var completedTiers: Set<String> = []
     let aspect: Double
     let captureDate: Date?
 
@@ -441,10 +444,14 @@ final class EditSession: @unchecked Sendable {
                 try engine.setParams(session: session, delta: delta)
                 for (k, v) in delta { params[k] = v }
             }
-            // A film-side change re-runs the film for this tier; otherwise the
-            // cached negative is reprinted.
-            return try engine.render(session: session, tier: tier, reprint: !shootChanged,
-                                     space: FilmEngine.displayP3)
+            // Force the first preview to build a real negative. Subsequent
+            // print-side edits can use the cached negative; meter, grain,
+            // halation and other film-side edits run through the film again.
+            let mustDevelop = shootChanged || !completedTiers.contains(tier)
+            let image = try engine.render(session: session, tier: tier, reprint: !mustDevelop,
+                                          space: FilmEngine.displayP3)
+            completedTiers.insert(tier)
+            return image
         }
     }
 
