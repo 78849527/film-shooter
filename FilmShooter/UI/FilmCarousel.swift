@@ -30,6 +30,11 @@ struct FilmCarousel: View {
     let onTap: (String) -> Void
     /// The scroll came to rest.
     let onSettle: () -> Void
+    /// Prevent stale iOS 16 geometry from overwriting a category selection
+    /// while ScrollViewReader moves to the requested film.
+    var programmaticTarget: String?
+    var programmaticUntil: Date = .distantPast
+    var onUserDrag: () -> Void = {}
     @State private var legacyDragging = false
 
     var body: some View {
@@ -122,6 +127,12 @@ struct FilmCarousel: View {
             }
             .coordinateSpace(name: "LegacyFilmCarousel")
             .onPreferenceChange(LegacyFilmCenterPreference.self) { positions in
+                // scrollTo is asynchronous: during a category jump, geometry
+                // initially still describes the PREVIOUS visible film.
+                // Accept user-drag movement, but not stale programmatic positions.
+                if !legacyDragging, programmaticTarget != nil, Date() < programmaticUntil {
+                    return
+                }
                 guard let closest = positions.min(by: {
                     abs($0.value - viewport / 2) < abs($1.value - viewport / 2)
                 })?.key else { return }
@@ -129,7 +140,10 @@ struct FilmCarousel: View {
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 4)
-                    .onChanged { _ in legacyDragging = true }
+                    .onChanged { _ in
+                        if !legacyDragging { onUserDrag() }
+                        legacyDragging = true
+                    }
                     .onEnded { _ in
                         Task { @MainActor in
                             try? await Task.sleep(nanoseconds: 240_000_000)
@@ -223,7 +237,9 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
                 .padding(.horizontal, 20)
             }
 
-            FilmCarousel(style: style, centeredID: $centeredID, onTap: tapCard, onSettle: settled)
+            FilmCarousel(style: style, centeredID: $centeredID, onTap: tapCard,
+                         onSettle: settled, programmaticTarget: jumpTarget,
+                         programmaticUntil: jumpUntil, onUserDrag: cancelProgrammaticJump)
                 .opacity(dimmed ? 0 : 1)
 
             HStack(spacing: 10) {
@@ -269,42 +285,47 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
         }
     }
 
-    /// Scroll to a film. Long jumps (more than four rolls) don't whip through
-    /// the row: the carousel dips out, moves, and fades back in.
+    /// Commit a button choice immediately. On iOS 16 the legacy carousel
+    /// needs a short geometry lock until its programmatic scroll catches up.
     private func jump(to id: String, haptic: Bool, commit: Bool) {
         jumpTarget = id
-        jumpUntil = Date().addingTimeInterval(0.7)
+        jumpUntil = Date().addingTimeInterval(0.85)
+        jumpTask?.cancel()
         if haptic { Haptics.selection() }
+
+        // The button's effect is synchronous; it does not depend on scroll
+        // animation completion or a delayed settle callback.
+        if commit, id != committedID {
+            ownCommit = id
+            onCommit(id)
+        }
+
         let films = FilmCatalog.films
         let from = films.firstIndex { $0.id == centeredID } ?? 0
         let to = films.firstIndex { $0.id == id } ?? 0
-        jumpTask?.cancel()
         if abs(to - from) > 4 {
-            jumpTask = Task {
-                withAnimation(.easeOut(duration: 0.12)) { dimmed = true }
-                try? await Task.sleep(nanoseconds: 120_000_000)
-                guard !Task.isCancelled else {
-                    dimmed = false
-                    return
-                }
-                var still = Transaction()
-                still.disablesAnimations = true
-                withTransaction(still) { centeredID = id }
-                try? await Task.sleep(nanoseconds: 30_000_000)
-                withAnimation(.easeIn(duration: 0.18)) { dimmed = false }
-            }
+            // Jump to distant kinds without a long delayed traverse.
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { centeredID = id }
         } else {
             withAnimation(Motion.pick(Motion.standard, reduceMotion: reduceMotion)) { centeredID = id }
         }
-        if commit { scheduleCommit(id) }
+    }
+
+    private func cancelProgrammaticJump() {
+        jumpTask?.cancel()
+        jumpTarget = nil
+        jumpUntil = .distantPast
+        settleTask?.cancel()
     }
 
     /// A detent passed under the notch: tick like a dial (no commit yet).
     private func centeredChanged(_ new: String?) {
         guard armed, let new else { return }
         if Date() < jumpUntil {
-            // A programmatic scroll passing other cards: only its target counts.
-            if new == jumpTarget { scheduleCommit(new) }
+            // The selected ID was committed at the moment of button tap.
+            // Do not re-commit intermediate carousel geometry.
             return
         }
         Haptics.selection()
@@ -324,17 +345,6 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
         }
     }
 
-    private func scheduleCommit(_ id: String) {
-        settleTask?.cancel()
-        let commit = onCommit
-        let current = committedID
-        settleTask = Task {
-            try? await Task.sleep(nanoseconds: 80_000_000)
-            guard !Task.isCancelled, id != current else { return }
-            ownCommit = id
-            commit(id)
-        }
-    }
 }
 
 // MARK: - Title
