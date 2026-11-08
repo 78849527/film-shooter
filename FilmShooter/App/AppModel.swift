@@ -24,10 +24,14 @@ final class AppModel: ObservableObject {
     /// What the camera develops with. Exposure here stays 0 in camera mode:
     /// exposure compensation is the camera's own (`camera.exposureBias`), so the
     /// viewfinder and the print agree.
-    @Published var recipe: DevelopRecipe {
+    // iOS 16 renders the old value when @Published announces from willSet
+    // during a projected SwiftUI binding write. Publish after committing the
+    // complete film + paper recipe to prevent one-selection lag.
+    var recipe: DevelopRecipe {
         didSet {
             guard recipe != oldValue else { return }
             if recipe.filmID != filmID { filmID = recipe.filmID }
+            objectWillChange.send()
             schedulePersist()
             if !isAdjustingPrint { refreshLUT() }
         }

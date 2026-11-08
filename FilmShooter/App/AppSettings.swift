@@ -78,16 +78,19 @@ enum OutputQuality: String, Codable, CaseIterable, Identifiable {
 /// User preferences, persisted in UserDefaults.
 @MainActor
 final class AppSettings: ObservableObject {
+    // Explicit publisher remains stable with no @Published properties.
+    // Settings must notify SwiftUI after their new values are stored.
+    let objectWillChange = ObservableObjectPublisher()
     private let defaults = UserDefaults.standard
 
-    @Published var outputQuality: OutputQuality { didSet { save(outputQuality.rawValue, "outputQuality") } }
-    @Published var saveFormat: PhotoDecoder.Format { didSet { save(saveFormat.rawValue, "saveFormat") } }
-    @Published var autoSaveToPhotos: Bool { didSet { save(autoSaveToPhotos, "autoSaveToPhotos") } }
-    @Published var keepOriginals: Bool { didSet { save(keepOriginals, "keepOriginals") } }
-    @Published var showGrid: Bool { didSet { save(showGrid, "showGrid") } }
-    @Published var frameAspect: FrameAspect { didSet { save(frameAspect.rawValue, "frameAspect") } }
-    @Published var viewfinderGrain: Bool { didSet { save(viewfinderGrain, "viewfinderGrain") } }
-    @Published var haptics: Bool {
+    var outputQuality: OutputQuality { didSet { save(outputQuality.rawValue, "outputQuality"); objectWillChange.send() } }
+    var saveFormat: PhotoDecoder.Format { didSet { save(saveFormat.rawValue, "saveFormat"); objectWillChange.send() } }
+    var autoSaveToPhotos: Bool { didSet { save(autoSaveToPhotos, "autoSaveToPhotos"); objectWillChange.send() } }
+    var keepOriginals: Bool { didSet { save(keepOriginals, "keepOriginals"); objectWillChange.send() } }
+    var showGrid: Bool { didSet { save(showGrid, "showGrid"); objectWillChange.send() } }
+    var frameAspect: FrameAspect { didSet { save(frameAspect.rawValue, "frameAspect"); objectWillChange.send() } }
+    var viewfinderGrain: Bool { didSet { save(viewfinderGrain, "viewfinderGrain"); objectWillChange.send() } }
+    var haptics: Bool {
         didSet {
             save(haptics, "haptics")
             Haptics.isEnabled = haptics
@@ -95,13 +98,14 @@ final class AppSettings: ObservableObject {
                 // A clear confirmation pulse so enabling the switch is testable.
                 Haptics.tap()
             }
+            objectWillChange.send()
         }
     }
-    @Published var rollLength: Int { didSet { save(rollLength, "rollLength") } }
+    var rollLength: Int { didSet { save(rollLength, "rollLength"); objectWillChange.send() } }
     /// Favourite films, in the order the user starred them.
-    @Published var favoriteFilmIDs: [String] { didSet { save(favoriteFilmIDs, "favoriteFilmIDs") } }
+    var favoriteFilmIDs: [String] { didSet { save(favoriteFilmIDs, "favoriteFilmIDs"); objectWillChange.send() } }
     /// Most recently used films, most recent first.
-    @Published var recentFilmIDs: [String] { didSet { save(recentFilmIDs, "recentFilmIDs") } }
+    var recentFilmIDs: [String] { didSet { save(recentFilmIDs, "recentFilmIDs"); objectWillChange.send() } }
 
     init() {
         let d = UserDefaults.standard

@@ -36,7 +36,9 @@ struct FilmCarousel: View {
     var programmaticUntil: Date = .distantPast
     var onUserDrag: () -> Void = {}
     @State private var legacyDragging = false
-    @State private var dragEndTask: Task<Void, Never>?
+    /// Prevent deceleration geometry from replacing the selected film after
+    /// releasing a gesture and programmatically snapping it to the centre.
+    @State private var snapUntil = Date.distantPast
 
     var body: some View {
         GeometryReader { geo in
@@ -131,6 +133,9 @@ struct FilmCarousel: View {
                 // scrollTo is asynchronous: during a category jump, geometry
                 // initially still describes the PREVIOUS visible film.
                 // Accept user-drag movement, but not stale programmatic positions.
+                if !legacyDragging, Date() < snapUntil {
+                    return
+                }
                 if !legacyDragging, programmaticTarget != nil, Date() < programmaticUntil {
                     return
                 }
@@ -142,23 +147,21 @@ struct FilmCarousel: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 4)
                     .onChanged { _ in
-                        dragEndTask?.cancel()
                         if !legacyDragging { onUserDrag() }
                         legacyDragging = true
                     }
                     .onEnded { _ in
-                        dragEndTask?.cancel()
-                        dragEndTask = Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 240_000_000)
-                            guard !Task.isCancelled else { return }
-                            legacyDragging = false
-                            if let id = centeredID {
-                                withAnimation(.easeOut(duration: 0.22)) {
-                                    proxy.scrollTo(id, anchor: .center)
-                                }
+                        // Commit at finger-up, not 240ms later. The old delay,
+                        // followed by another 60ms settle, made fast swipes
+                        // reliably develop the previous film.
+                        legacyDragging = false
+                        snapUntil = Date().addingTimeInterval(0.4)
+                        if let id = centeredID {
+                            withAnimation(.easeOut(duration: 0.16)) {
+                                proxy.scrollTo(id, anchor: .center)
                             }
-                            onSettle()
                         }
+                        onSettle()
                     }
             )
             .onAppear {
@@ -166,11 +169,10 @@ struct FilmCarousel: View {
             }
             .compatibleOnChange(of: programmaticTarget) { _, target in
                 if target != nil {
-                    dragEndTask?.cancel()
                     legacyDragging = false
+                    snapUntil = Date().addingTimeInterval(0.4)
                 }
             }
-            .onDisappear { dragEndTask?.cancel() }
             .compatibleOnChange(of: centeredID) { _, selected in
                 guard !legacyDragging, let selected else { return }
                 withAnimation(Motion.standard) {
@@ -343,19 +345,14 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
         Haptics.selection()
     }
 
-    /// The scroll came to rest: commit whatever is under the notch.
+    /// A user release commits the reel currently under the notch in the same
+    /// event. Programmatic movements remain excluded by jumpUntil.
     private func settled() {
-        guard armed, Date() >= jumpUntil else { return }
+        guard armed, Date() >= jumpUntil,
+              let id = centeredID, id != committedID else { return }
         settleTask?.cancel()
-        let commit = onCommit
-        let current = committedID
-        settleTask = Task {
-            try? await Task.sleep(nanoseconds: 60_000_000)
-            guard !Task.isCancelled, Date() >= jumpUntil,
-                  let id = centeredID, id != current else { return }
-            ownCommit = id
-            commit(id)
-        }
+        ownCommit = id
+        onCommit(id)
     }
 
 }

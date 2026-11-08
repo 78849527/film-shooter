@@ -15,9 +15,14 @@ final class EditorModel: ObservableObject, Identifiable {
     let id = UUID()
     let source: Source
 
-    @Published var recipe: DevelopRecipe {
+    // A @Published property emits objectWillChange from willSet, before its
+    // actual storage changes. The iOS 16 SwiftUI binding can then redraw
+    // against the previous film / toggle value. Emit after the new recipe
+    // has been stored, so UI and rendering share the same generation.
+    var recipe: DevelopRecipe {
         didSet {
             guard recipe != oldValue else { return }
+            objectWillChange.send()
             // Auto exposure, grain and halation act on the negative, not the
             // print. Prioritise the latest adjustment instead of waiting for
             // a now-obsolete GPU render to finish.
