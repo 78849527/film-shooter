@@ -313,7 +313,7 @@ struct ControlSection<Content: View>: View {
 /// Keeps an icon upright when the phone is turned (the UI itself stays portrait).
 @MainActor
 struct DeviceRotation: ViewModifier {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
@@ -332,7 +332,7 @@ extension View {
 
 /// `model.banner` as a capsule toast that springs in from the top.
 struct BannerOverlay: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var topPadding: CGFloat = 8
 

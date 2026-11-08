@@ -34,7 +34,7 @@ struct CrossfadeImage: View {
                 layers = [Layer(id: 0, image: image)]
             }
         }
-        .onChange(of: image.map { ObjectIdentifier($0) }) { _, _ in
+        .compatibleOnChange(of: image.map { ObjectIdentifier($0) }) { _, _ in
             push(image)
         }
     }
@@ -48,7 +48,9 @@ struct CrossfadeImage: View {
         let layer = Layer(id: counter, image: new)
         withAnimation(.easeOut(duration: duration)) {
             layers.append(layer)
-        } completion: {
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             // The new picture is opaque now: drop what is underneath.
             layers.removeAll { $0.id < layer.id }
         }
@@ -123,8 +125,8 @@ struct DevelopingJobImage<Overlay: View>: View {
             overlay(progress)
         }
         .onAppear { run() }
-        .onChange(of: job.phase) { _, _ in run() }
-        .onChange(of: job.startedAt) { _, _ in run() }
+        .compatibleOnChange(of: job.phase) { _, _ in run() }
+        .compatibleOnChange(of: job.startedAt) { _, _ in run() }
         .onDisappear { animationTask?.cancel() }
     }
 

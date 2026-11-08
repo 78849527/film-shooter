@@ -98,7 +98,7 @@ struct CameraScreen: View {
         }
         .onAppear {
             let fx = self.fx
-            model.camera.onShutter = { MainActor.assumeIsolated { fx.fire() } }
+            model.camera.onShutter = { Task { @MainActor in fx.fire() } }
             Haptics.prepareShutter()
         }
         .compatibleOnChange(of: editor != nil) { _, open in pauseCameraForEditor(open) }
