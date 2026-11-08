@@ -71,7 +71,9 @@ struct PhotoDetailView: View {
 
     // MARK: pager
 
+    @ViewBuilder
     private var pager: some View {
+        if #available(iOS 17.0, *) {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
@@ -91,6 +93,23 @@ struct PhotoDetailView: View {
             .scrollIndicators(.hidden)
             .ignoresSafeArea()
             .onAppear { proxy.scrollTo(startID) }
+        }
+        } else {
+            // iOS 16: use the native paged TabView; the iOS 17 scroll-position
+            // and container-relative sizing APIs are not available here.
+            TabView(selection: $scrolledID) {
+                ForEach(model.library.photos) { photo in
+                    GeometryReader { geo in
+                        PhotoPage(photo: photo, isZoomed: $isZoomed) {
+                            withAnimation(Motion.standard) { chromeHidden.toggle() }
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height)
+                    }
+                    .tag(Optional(photo.id))
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .ignoresSafeArea()
         }
     }
 
