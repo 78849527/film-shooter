@@ -18,8 +18,8 @@ struct FilmSlider: View {
     var trailingLabel: String? = nil
     var format: (Double) -> String = FilmSlider.signed
     /// Called with true when a drag starts and false when it ends.
-    var onEditingChanged: (Bool) -> Void = { _ in }
     var compact: Bool = false
+    var onEditingChanged: (Bool) -> Void = { _ in }
 
     @State private var isDragging = false
     @State private var startValue: Double = 0
