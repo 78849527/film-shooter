@@ -84,7 +84,7 @@ struct CameraScreen: View {
                 .environmentObject(model)
         }
         .sheet(item: $settingsRequest) { request in
-            SettingsView(startAtAbout: request.startAtAbout)
+            SettingsView(settings: model.settings, startAtAbout: request.startAtAbout)
                 .environmentObject(model)
         }
         .fullScreenCover(item: $galleryRequest) { request in

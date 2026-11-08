@@ -8,6 +8,7 @@ enum SettingsRoute: Hashable {
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
 
     /// The navigation path. Initialised with About when asked to open there,
@@ -15,12 +16,12 @@ struct SettingsView: View {
     @State private var path: [SettingsRoute]
     @State private var confirmRewind = false
 
-    init(startAtAbout: Bool = false) {
+    init(settings: AppSettings, startAtAbout: Bool = false) {
+        _settings = ObservedObject(wrappedValue: settings)
         _path = State(initialValue: startAtAbout ? [.about] : [])
     }
 
     var body: some View {
-        @ObservedObject var settings = model.settings
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(spacing: 22) {

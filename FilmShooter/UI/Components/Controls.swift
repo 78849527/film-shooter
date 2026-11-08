@@ -237,10 +237,7 @@ struct SettingToggle: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        Toggle(isOn: Binding(get: { isOn }, set: { newValue in
-            Haptics.selection()
-            withAnimation(Motion.snappy) { isOn = newValue }
-        })) {
+        Toggle(isOn: $isOn) {
             HStack(spacing: 12) {
                 if let systemImage {
                     Image(systemName: systemImage)
@@ -263,6 +260,7 @@ struct SettingToggle: View {
             }
         }
         .tint(Theme.accent)
+        .compatibleOnChange(of: isOn) { _, _ in Haptics.selection() }
     }
 }
 
