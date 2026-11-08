@@ -71,6 +71,8 @@ targets:
           GCC_OPTIMIZATION_LEVEL: "0"
           SWIFT_OPTIMIZATION_LEVEL: "-Onone"
     dependencies:
+      - target: FilmShooterPhotoEditExtension
+        embed: true
       - sdk: Metal.framework
       - sdk: MetalKit.framework
       - sdk: QuartzCore.framework
@@ -84,6 +86,71 @@ targets:
       - sdk: PhotosUI.framework
       - sdk: ImageIO.framework
       - sdk: UniformTypeIdentifiers.framework
+  FilmShooterPhotoEditExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PhotoEditingExtension
+        excludes:
+          - "*.plist"
+          - "*.md"
+      - path: FilmShooter/Engine/MetalContext.swift
+      - path: FilmShooter/Engine/FilmEngine.swift
+      - path: FilmShooter/Engine/FilmLUT.swift
+      - path: FilmShooter/Engine/DevelopRecipe.swift
+      - path: FilmShooter/Engine/FilmCatalog.swift
+      - path: FilmShooter/Library/PhotoDecoder.swift
+      - path: Engine/src
+        excludes:
+          - "shaders/**"
+      - path: Engine/include
+      - path: build/EngineResources
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: FilmShooterPhotoEditExtension
+        PRODUCT_MODULE_NAME: FilmShooterPhotoEditExtension
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.filmshooter.app.photoedit
+        INFOPLIST_FILE: PhotoEditingExtension/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_OBJC_BRIDGING_HEADER: FilmShooter/Engine/FilmShooter-Bridging-Header.h
+        APPLICATION_EXTENSION_API_ONLY: YES
+        CLANG_CXX_LANGUAGE_STANDARD: c++20
+        CLANG_CXX_LIBRARY: libc++
+        CLANG_ENABLE_OBJC_ARC: YES
+        GCC_C_LANGUAGE_STANDARD: gnu17
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/Engine/include
+          - $(SRCROOT)/Engine/src
+          - $(SRCROOT)/Engine/src/core
+          - $(SRCROOT)/Engine/third_party/metal-cpp
+        OTHER_CPLUSPLUSFLAGS: "$(inherited) -Wno-shorten-64-to-32 -Wno-comma -Wno-conversion -Wno-return-type-c-linkage"
+        USE_HEADERMAP: NO
+        MTL_FAST_MATH: YES
+        MTL_LANGUAGE_REVISION: Metal30
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
+        GCC_OPTIMIZATION_LEVEL: "2"
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+      configs:
+        Debug:
+          GCC_OPTIMIZATION_LEVEL: "0"
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    dependencies:
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: QuartzCore.framework
+      - sdk: CoreText.framework
+      - sdk: CoreGraphics.framework
+      - sdk: Accelerate.framework
+      - sdk: CoreImage.framework
+      - sdk: CoreVideo.framework
+      - sdk: ImageIO.framework
+      - sdk: Photos.framework
+      - sdk: PhotosUI.framework
+      - sdk: UniformTypeIdentifiers.framework
+
 schemes:
   FilmShooter:
     build:
