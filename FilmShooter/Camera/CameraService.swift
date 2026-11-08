@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Combine
 
 /// One captured frame, as delivered by `AVCapturePhotoOutput`.
 struct CapturedPhoto: @unchecked Sendable {
@@ -28,7 +29,7 @@ enum CameraServiceError: LocalizedError {
 
 /// Runs `body` on the main actor, asynchronously and in FIFO order.
 private func runOnMain(_ body: @escaping @MainActor () -> Void) {
-    DispatchQueue.main.async { MainActor.assumeIsolated(body) }
+    DispatchQueue.main.async { Task { @MainActor in body() } }
 }
 
 /// The camera: session lifecycle, lenses and zoom, focus/exposure, capture.
@@ -114,8 +115,8 @@ final class CameraService: NSObject, ObservableObject {
     private var switchGeneration = 0
     private var eventsInstalled = false
     private weak var activeDevice: AVCaptureDevice?
-    private var captureCoordinator: AVCaptureDevice.RotationCoordinator?
-    private var iconCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var captureCoordinator: AnyObject?
+    private var iconCoordinator: AnyObject?
     private var captureAngleObservation: NSKeyValueObservation?
     private var iconAngleObservation: NSKeyValueObservation?
 
@@ -358,6 +359,11 @@ final class CameraService: NSObject, ObservableObject {
 
     private func installCaptureCoordinator(for device: AVCaptureDevice) {
         captureAngleObservation?.invalidate()
+        guard #available(iOS 17.0, *) else {
+            captureCoordinator = nil
+            setCaptureAngle(90)
+            return
+        }
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
         captureCoordinator = coordinator
         setCaptureAngle(coordinator.videoRotationAngleForHorizonLevelCapture)
@@ -370,6 +376,11 @@ final class CameraService: NSObject, ObservableObject {
     /// active, so their direction never depends on the front sensor mounting.
     private func installIconCoordinator(for device: AVCaptureDevice) {
         iconAngleObservation?.invalidate()
+        guard #available(iOS 17.0, *) else {
+            iconCoordinator = nil
+            setIconAngle(from: 90)
+            return
+        }
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
         iconCoordinator = coordinator
         setIconAngle(from: coordinator.videoRotationAngleForHorizonLevelCapture)
@@ -393,6 +404,7 @@ final class CameraService: NSObject, ObservableObject {
         if abs(delta) > 0.01 { uiRotationAngle += delta }
     }
 
+    @available(iOS 17.0, *)
     nonisolated private static func observeCaptureAngle(
         of coordinator: AVCaptureDevice.RotationCoordinator,
         handler: @escaping @Sendable (CGFloat) -> Void
@@ -622,9 +634,14 @@ private final class CaptureController: @unchecked Sendable {
                 return
             }
             let settings = makeSettings(for: request)
-            if let connection = photoOutput.connection(with: .video),
-               connection.isVideoRotationAngleSupported(request.rotationAngle) {
-                connection.videoRotationAngle = request.rotationAngle
+            if let connection = photoOutput.connection(with: .video) {
+                if #available(iOS 17.0, *) {
+                    if connection.isVideoRotationAngleSupported(request.rotationAngle) {
+                        connection.videoRotationAngle = request.rotationAngle
+                    }
+                } else if connection.isVideoOrientationSupported {
+                    connection.videoOrientation = .portrait
+                }
             }
             let id = settings.uniqueID
             let processor = PhotoCaptureProcessor(request: request, onShutter: onShutter) { [weak self] result in
@@ -686,7 +703,11 @@ private final class CaptureController: @unchecked Sendable {
     private func configureConnections(position: AVCaptureDevice.Position) {
         let mirrored = position == .front
         if let connection = videoOutput.connection(with: .video) {
-            if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
+            if #available(iOS 17.0, *) {
+                if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
+            } else if connection.isVideoOrientationSupported {
+                connection.videoOrientation = .portrait
+            }
             if connection.isVideoMirroringSupported {
                 connection.automaticallyAdjustsVideoMirroring = false
                 connection.isVideoMirrored = mirrored
