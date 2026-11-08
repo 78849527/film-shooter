@@ -73,6 +73,9 @@ targets:
     dependencies:
       - target: FilmShooterPhotoEditExtension
         embed: true
+        link: false
+        copy:
+          destination: plugins
       - sdk: Metal.framework
       - sdk: MetalKit.framework
       - sdk: QuartzCore.framework
