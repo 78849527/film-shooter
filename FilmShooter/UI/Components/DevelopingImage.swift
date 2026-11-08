@@ -188,7 +188,7 @@ struct ProgressRing: View {
 /// A developed print's contact-sheet thumbnail: from the memory cache when
 /// it is there, otherwise decoded off the main thread and faded in.
 struct LibraryThumbnail: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     let photo: DevelopedPhoto
     var contentMode: ContentMode = .fill
 
