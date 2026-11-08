@@ -173,6 +173,21 @@ struct EditorView: View {
         }
         .aspectRatio(aspect, contentMode: .fit)
         .clipShape(corner)
+        .overlay(alignment: .center) {
+            if !editor.isLoading && editor.preview != nil && !editor.previewMatchesSelection {
+                VStack(spacing: 7) {
+                    ProgressView()
+                        .tint(Theme.accent)
+                    Text("正在匹配胶卷与相纸")
+                        .font(AppFont.ui(12, .medium))
+                        .foregroundStyle(Theme.text)
+                }
+                .padding(.horizontal, 17)
+                .padding(.vertical, 13)
+                .background(Capsule().fill(Color.black.opacity(0.82)))
+                .allowsHitTesting(false)
+            }
+        }
         .background(
             corner
                 .fill(Color.black)
@@ -250,7 +265,7 @@ struct EditorView: View {
 /// The editor's film chooser; the only part of the editor that reads the
 /// recipe's film, so slider drags don't re-evaluate the whole screen.
 struct EditorFilmSection: View {
-    let editor: EditorModel
+    @ObservedObject var editor: EditorModel
 
     var body: some View {
         let editor = self.editor

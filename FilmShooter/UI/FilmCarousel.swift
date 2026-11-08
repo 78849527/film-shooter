@@ -36,6 +36,7 @@ struct FilmCarousel: View {
     var programmaticUntil: Date = .distantPast
     var onUserDrag: () -> Void = {}
     @State private var legacyDragging = false
+    @State private var dragEndTask: Task<Void, Never>?
 
     var body: some View {
         GeometryReader { geo in
@@ -141,12 +142,15 @@ struct FilmCarousel: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 4)
                     .onChanged { _ in
+                        dragEndTask?.cancel()
                         if !legacyDragging { onUserDrag() }
                         legacyDragging = true
                     }
                     .onEnded { _ in
-                        Task { @MainActor in
+                        dragEndTask?.cancel()
+                        dragEndTask = Task { @MainActor in
                             try? await Task.sleep(nanoseconds: 240_000_000)
+                            guard !Task.isCancelled else { return }
                             legacyDragging = false
                             if let id = centeredID {
                                 withAnimation(.easeOut(duration: 0.22)) {
@@ -160,6 +164,13 @@ struct FilmCarousel: View {
             .onAppear {
                 if let id = centeredID { proxy.scrollTo(id, anchor: .center) }
             }
+            .compatibleOnChange(of: programmaticTarget) { _, target in
+                if target != nil {
+                    dragEndTask?.cancel()
+                    legacyDragging = false
+                }
+            }
+            .onDisappear { dragEndTask?.cancel() }
             .compatibleOnChange(of: centeredID) { _, selected in
                 guard !legacyDragging, let selected else { return }
                 withAnimation(Motion.standard) {
@@ -288,6 +299,7 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
     /// Commit a button choice immediately. On iOS 16 the legacy carousel
     /// needs a short geometry lock until its programmatic scroll catches up.
     private func jump(to id: String, haptic: Bool, commit: Bool) {
+        settleTask?.cancel()
         jumpTarget = id
         jumpUntil = Date().addingTimeInterval(0.85)
         jumpTask?.cancel()
@@ -339,7 +351,8 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
         let current = committedID
         settleTask = Task {
             try? await Task.sleep(nanoseconds: 60_000_000)
-            guard !Task.isCancelled, let id = centeredID, id != current else { return }
+            guard !Task.isCancelled, Date() >= jumpUntil,
+                  let id = centeredID, id != current else { return }
             ownCommit = id
             commit(id)
         }

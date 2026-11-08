@@ -163,6 +163,7 @@ enum Haptics {
         Task {
             for i in 0..<3 {
                 try? await Task.sleep(nanoseconds: 62_000_000)
+                guard !Task.isCancelled, isEnabled else { return }
                 rigid.impactOccurred(intensity: 0.32 + 0.1 * CGFloat(i))
             }
         }

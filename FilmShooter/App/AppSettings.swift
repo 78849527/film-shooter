@@ -87,7 +87,16 @@ final class AppSettings: ObservableObject {
     @Published var showGrid: Bool { didSet { save(showGrid, "showGrid") } }
     @Published var frameAspect: FrameAspect { didSet { save(frameAspect.rawValue, "frameAspect") } }
     @Published var viewfinderGrain: Bool { didSet { save(viewfinderGrain, "viewfinderGrain") } }
-    @Published var haptics: Bool { didSet { save(haptics, "haptics") } }
+    @Published var haptics: Bool {
+        didSet {
+            save(haptics, "haptics")
+            Haptics.isEnabled = haptics
+            if haptics && !oldValue {
+                // A clear confirmation pulse so enabling the switch is testable.
+                Haptics.tap()
+            }
+        }
+    }
     @Published var rollLength: Int { didSet { save(rollLength, "rollLength") } }
     /// Favourite films, in the order the user starred them.
     @Published var favoriteFilmIDs: [String] { didSet { save(favoriteFilmIDs, "favoriteFilmIDs") } }
@@ -108,6 +117,8 @@ final class AppSettings: ObservableObject {
         favoriteFilmIDs = d.stringArray(forKey: "favoriteFilmIDs")
             ?? ["kodak_portra_400", "kodak_gold_200", "fujifilm_pro_400h", "cinestill_800t", "kodak_tri_x_400"]
         recentFilmIDs = d.stringArray(forKey: "recentFilmIDs") ?? []
+        // Do not depend on the root SwiftUI view update order for haptics.
+        Haptics.isEnabled = haptics
     }
 
     private func save(_ value: Any, _ key: String) {

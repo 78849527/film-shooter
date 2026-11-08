@@ -33,6 +33,9 @@ final class EditorModel: ObservableObject, Identifiable {
 
     /// The latest rendered print (screen size).
     @Published private(set) var preview: UIImage?
+    /// Exact film + paper + texture recipe used to produce the image above.
+    /// The selection UI may update immediately while its render is in flight.
+    @Published private(set) var previewRecipe: DevelopRecipe?
     /// The photo as it came in, for press-and-hold comparison.
     @Published private(set) var original: UIImage?
     @Published private(set) var isLoading = true
@@ -42,7 +45,10 @@ final class EditorModel: ObservableObject, Identifiable {
     @Published private(set) var lastRenderMS: Double = 0
 
     var film: FilmStock { recipe.film }
-    var canDevelop: Bool { error == nil && !isLoading }
+    var previewMatchesSelection: Bool { preview != nil && previewRecipe == recipe }
+    // Do not let a render request be exported before its film + paper have
+    // actually appeared in the preview the user approved.
+    var canDevelop: Bool { error == nil && !isLoading && !isRendering && previewMatchesSelection }
 
     private var session: EditSession?
     private var isClosed = false
@@ -66,6 +72,7 @@ final class EditorModel: ObservableObject, Identifiable {
         isLoading = true
         error = nil
         preview = nil
+        previewRecipe = nil
         do {
             let data: Data
             let isRAW: Bool
@@ -138,14 +145,17 @@ final class EditorModel: ObservableObject, Identifiable {
             do {
                 let img = try await session.preview(recipe: wanted)
                 lastRenderMS = img.elapsedMS
-                if !pending {
+                if !pending && wanted == recipe {
+                    previewRecipe = wanted
                     preview = UIImage(cgImage: img.cgImage)
+                    error = nil
                 }
-                error = nil
             } catch {
-                if !pending { self.error = error.localizedDescription }
+                // A cancelled/obsolete render is not an error for the new film.
+                if !pending && wanted == recipe { self.error = error.localizedDescription }
             }
-        } while pending
+            if wanted != recipe { pending = true }
+        } while pending && !isClosed
         isRendering = false
     }
 
