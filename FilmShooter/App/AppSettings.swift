@@ -1,5 +1,4 @@
 import Foundation
-import Observation
 
 /// The picture's shape in the camera, long : short.
 enum FrameAspect: String, Codable, CaseIterable, Identifiable {
@@ -76,23 +75,23 @@ enum OutputQuality: String, Codable, CaseIterable, Identifiable {
 }
 
 /// User preferences, persisted in UserDefaults.
-@Observable @MainActor
-final class AppSettings {
+@MainActor
+final class AppSettings: ObservableObject {
     private let defaults = UserDefaults.standard
 
-    var outputQuality: OutputQuality { didSet { save(outputQuality.rawValue, "outputQuality") } }
-    var saveFormat: PhotoDecoder.Format { didSet { save(saveFormat.rawValue, "saveFormat") } }
-    var autoSaveToPhotos: Bool { didSet { save(autoSaveToPhotos, "autoSaveToPhotos") } }
-    var keepOriginals: Bool { didSet { save(keepOriginals, "keepOriginals") } }
-    var showGrid: Bool { didSet { save(showGrid, "showGrid") } }
-    var frameAspect: FrameAspect { didSet { save(frameAspect.rawValue, "frameAspect") } }
-    var viewfinderGrain: Bool { didSet { save(viewfinderGrain, "viewfinderGrain") } }
-    var haptics: Bool { didSet { save(haptics, "haptics") } }
-    var rollLength: Int { didSet { save(rollLength, "rollLength") } }
+    @Published var outputQuality: OutputQuality { didSet { save(outputQuality.rawValue, "outputQuality") } }
+    @Published var saveFormat: PhotoDecoder.Format { didSet { save(saveFormat.rawValue, "saveFormat") } }
+    @Published var autoSaveToPhotos: Bool { didSet { save(autoSaveToPhotos, "autoSaveToPhotos") } }
+    @Published var keepOriginals: Bool { didSet { save(keepOriginals, "keepOriginals") } }
+    @Published var showGrid: Bool { didSet { save(showGrid, "showGrid") } }
+    @Published var frameAspect: FrameAspect { didSet { save(frameAspect.rawValue, "frameAspect") } }
+    @Published var viewfinderGrain: Bool { didSet { save(viewfinderGrain, "viewfinderGrain") } }
+    @Published var haptics: Bool { didSet { save(haptics, "haptics") } }
+    @Published var rollLength: Int { didSet { save(rollLength, "rollLength") } }
     /// Favourite films, in the order the user starred them.
-    var favoriteFilmIDs: [String] { didSet { save(favoriteFilmIDs, "favoriteFilmIDs") } }
+    @Published var favoriteFilmIDs: [String] { didSet { save(favoriteFilmIDs, "favoriteFilmIDs") } }
     /// Most recently used films, most recent first.
-    var recentFilmIDs: [String] { didSet { save(recentFilmIDs, "recentFilmIDs") } }
+    @Published var recentFilmIDs: [String] { didSet { save(recentFilmIDs, "recentFilmIDs") } }
 
     init() {
         let d = UserDefaults.standard

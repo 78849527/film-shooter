@@ -1,5 +1,4 @@
 import Foundation
-import Observation
 import Photos
 import UIKit
 
@@ -26,12 +25,12 @@ struct DevelopedPhoto: Identifiable, Codable, Hashable {
 
 /// The developed photos, stored in Documents/Roll as files plus a JSON sidecar
 /// each (so the library survives anything short of deleting the app).
-@Observable @MainActor
-final class PhotoLibrary {
-    private(set) var photos: [DevelopedPhoto] = []
+@MainActor
+final class PhotoLibrary: ObservableObject {
+    @Published private(set) var photos: [DevelopedPhoto] = []
 
-    @ObservationIgnored private let thumbs = NSCache<NSUUID, UIImage>()
-    @ObservationIgnored let directory: URL
+    private let thumbs = NSCache<NSUUID, UIImage>()
+    let directory: URL
 
     init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]

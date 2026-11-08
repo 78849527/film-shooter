@@ -5,10 +5,10 @@ import AVFoundation
 
 /// The shutter blackout and film-advance haptic. `CameraService.onShutter`
 /// calls `fire()`; only `BlackoutLayer` reads `blackout`.
-@Observable @MainActor
-final class ShutterFX {
-    var blackout: Double = 0
-    @ObservationIgnored private var task: Task<Void, Never>?
+@MainActor
+final class ShutterFX: ObservableObject {
+    @Published var blackout: Double = 0
+    private var task: Task<Void, Never>?
 
     func fire() {
         Haptics.filmAdvance()
@@ -314,7 +314,7 @@ struct ViewfinderLayer: View {
 }
 
 struct BlackoutLayer: View {
-    let fx: ShutterFX
+    @ObservedObject var fx: ShutterFX
 
     var body: some View {
         Color.black

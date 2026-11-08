@@ -1,11 +1,10 @@
 import Foundation
-import Observation
 import UIKit
 
 /// The darkroom editor: one photo held open in the engine while the user tries
 /// films, papers and print settings on it; every change re-renders a
 /// screen-sized print (the negative is cached, so print-side changes are fast).
-@Observable @MainActor
+@MainActor
 final class EditorModel: Identifiable {
     enum Source {
         case imported(data: Data, isRAW: Bool)
@@ -15,29 +14,29 @@ final class EditorModel: Identifiable {
     let id = UUID()
     let source: Source
 
-    var recipe: DevelopRecipe {
+    @Published var recipe: DevelopRecipe {
         didSet { if recipe != oldValue { scheduleRender(filmChanged: recipe.filmID != oldValue.filmID) } }
     }
 
     /// The latest rendered print (screen size).
-    private(set) var preview: UIImage?
+    @Published private(set) var preview: UIImage?
     /// The photo as it came in, for press-and-hold comparison.
-    private(set) var original: UIImage?
-    private(set) var isLoading = true
-    private(set) var isRendering = false
-    private(set) var error: String?
+    @Published private(set) var original: UIImage?
+    @Published private(set) var isLoading = true
+    @Published private(set) var isRendering = false
+    @Published private(set) var error: String?
     /// Render time of the last preview, ms.
-    private(set) var lastRenderMS: Double = 0
+    @Published private(set) var lastRenderMS: Double = 0
 
     var film: FilmStock { recipe.film }
     var canDevelop: Bool { error == nil && !isLoading }
 
-    @ObservationIgnored private var session: EditSession?
-    @ObservationIgnored private var isClosed = false
-    @ObservationIgnored private var renderTask: Task<Void, Never>?
-    @ObservationIgnored private var pending = false
-    @ObservationIgnored private let quality: Int
-    @ObservationIgnored private var captureDate: Date?
+    private var session: EditSession?
+    private var isClosed = false
+    private var renderTask: Task<Void, Never>?
+    private var pending = false
+    private let quality: Int
+    private var captureDate: Date?
 
     init(source: Source, recipe: DevelopRecipe, outputLongEdge: Int) {
         self.source = source

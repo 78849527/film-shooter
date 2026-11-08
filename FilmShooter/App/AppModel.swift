@@ -1,12 +1,12 @@
 import Foundation
-import Observation
+import Combine
 import SwiftUI
 import UIKit
 
 /// The app's state: the film loaded in the camera, the engine, the viewfinder
 /// table, the development queue and the contact sheet.
-@Observable @MainActor
-final class AppModel {
+@MainActor
+final class AppModel: ObservableObject {
     enum EngineState: Equatable {
         case starting
         case ready
@@ -17,14 +17,14 @@ final class AppModel {
     let library: PhotoLibrary
     let camera: CameraService
     let darkroom: Darkroom
-    @ObservationIgnored let luts = LUTStore()
+    let luts = LUTStore()
 
-    private(set) var engineState: EngineState = .starting
+    @Published private(set) var engineState: EngineState = .starting
 
     /// What the camera develops with. Exposure here stays 0 in camera mode:
     /// exposure compensation is the camera's own (`camera.exposureBias`), so the
     /// viewfinder and the print agree.
-    var recipe: DevelopRecipe {
+    @Published var recipe: DevelopRecipe {
         didSet {
             guard recipe != oldValue else { return }
             if recipe.filmID != filmID { filmID = recipe.filmID }
@@ -35,26 +35,27 @@ final class AppModel {
 
     /// The loaded film's id, tracked on its own so views that only care about
     /// the film don't re-render on every print-slider tick.
-    private(set) var filmID: String
+    @Published private(set) var filmID: String
 
     /// True while a print slider is being dragged: the viewfinder table is
     /// re-baked once on release instead of mid-drag.
-    var isAdjustingPrint = false {
+    @Published var isAdjustingPrint = false {
         didSet { if oldValue && !isAdjustingPrint { refreshLUT() } }
     }
 
     /// The viewfinder's current colour table (nil until the first bake).
-    private(set) var lut: FilmLUT?
-    private(set) var isBakingLUT = false
+    @Published private(set) var lut: FilmLUT?
+    @Published private(set) var isBakingLUT = false
 
     /// The next frame number on the roll (1...rollLength).
-    private(set) var frameNumber: Int
+    @Published private(set) var frameNumber: Int
     /// A transient message for the HUD ("新胶卷已装好", errors ...).
-    var banner: String?
+    @Published var banner: String?
 
-    @ObservationIgnored private var bannerTask: Task<Void, Never>?
-    @ObservationIgnored private var lutTask: Task<Void, Never>?
-    @ObservationIgnored private var persistTask: Task<Void, Never>?
+    private var bannerTask: Task<Void, Never>?
+    private var lutTask: Task<Void, Never>?
+    private var persistTask: Task<Void, Never>?
+    private var childSubscriptions = Set<AnyCancellable>()
 
     var film: FilmStock { FilmCatalog.film(filmID) }
     var paper: PrintPaper? { film.kind.usesPrintPaper ? FilmCatalog.paper(recipe.resolvedPaperID) : nil }
@@ -88,6 +89,14 @@ final class AppModel {
         lut = luts.cached(for: recipe)
         let darkroom = self.darkroom
         luts.shouldPause = { darkroom.isBusy }
+        // iOS 16's environment object observes AppModel. Forward nested model updates.
+        for publisher in [settings.objectWillChange.eraseToAnyPublisher(),
+                          library.objectWillChange.eraseToAnyPublisher(),
+                          camera.objectWillChange.eraseToAnyPublisher(),
+                          darkroom.objectWillChange.eraseToAnyPublisher()] {
+            publisher.sink { [weak self] _ in self?.objectWillChange.send() }
+                .store(in: &childSubscriptions)
+        }
     }
 
     // MARK: lifecycle

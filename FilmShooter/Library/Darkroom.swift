@@ -1,5 +1,4 @@
 import Foundation
-import Observation
 import UIKit
 import CoreImage
 
@@ -40,21 +39,21 @@ enum DevelopSource {
 /// and come out as prints in the library (and in Photos). One at a time, on the
 /// engine's queue, and only while the app is in the foreground -- iOS refuses
 /// GPU work in the background.
-@Observable @MainActor
-final class Darkroom {
-    private(set) var jobs: [DevelopJob] = []
+@MainActor
+final class Darkroom: ObservableObject {
+    @Published private(set) var jobs: [DevelopJob] = []
     /// The most recent print, for the gallery button's thumbnail.
-    private(set) var lastDeveloped: DevelopedPhoto?
+    @Published private(set) var lastDeveloped: DevelopedPhoto?
     /// Bumps every time a print is finished (the UI animates on it).
-    private(set) var completedCount = 0
-    private(set) var lastError: String?
+    @Published private(set) var completedCount = 0
+    @Published private(set) var lastError: String?
 
-    @ObservationIgnored private let library: PhotoLibrary
-    @ObservationIgnored private let settings: AppSettings
-    @ObservationIgnored private var sources: [UUID: (DevelopSource, Double?, Int, Date)] = [:]
-    @ObservationIgnored private var worker: Task<Void, Never>?
-    @ObservationIgnored private var isForeground = true
-    @ObservationIgnored private var recentDurations: [Double] = [2.5]
+    private let library: PhotoLibrary
+    private let settings: AppSettings
+    private var sources: [UUID: (DevelopSource, Double?, Int, Date)] = [:]
+    private var worker: Task<Void, Never>?
+    private var isForeground = true
+    private var recentDurations: [Double] = [2.5]
 
     init(library: PhotoLibrary, settings: AppSettings) {
         self.library = library
