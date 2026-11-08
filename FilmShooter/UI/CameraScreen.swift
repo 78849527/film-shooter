@@ -39,6 +39,8 @@ struct CameraScreen: View {
     @State private var editor: EditorModel?
     @State private var permissionDismissed = false
     @State private var didOpenScene = false
+    @State private var didRouteStartup = false
+    @State private var showStartupImporter = false
 
     /// The hardware shutter (Camera Control / volume buttons) only fires
     /// while the camera screen itself is in front.
@@ -69,6 +71,9 @@ struct CameraScreen: View {
             .padding(.bottom, 2)
         }
         .background(Theme.background.ignoresSafeArea())
+        .photoImporter(isPresented: $showStartupImporter) { imported in
+            editor = imported
+        }
         .overlay { aspectOverlay }
         .overlay { BannerOverlay(topPadding: 52) }
         .overlay { PermissionGate(dismissed: $permissionDismissed) }
@@ -102,7 +107,15 @@ struct CameraScreen: View {
             Haptics.prepareShutter()
         }
         .compatibleOnChange(of: editor != nil) { _, open in pauseCameraForEditor(open) }
-        .task { await openScreenshotScene() }
+        .task {
+            await openScreenshotScene()
+            await openStartupEditorIfNeeded()
+        }
+        .compatibleOnChange(of: showStartupImporter) { wasOpen, isOpen in
+            // If the user cancelled the picker, show the normal live camera.
+            guard wasOpen, !isOpen, editor == nil else { return }
+            Task { await model.camera.start() }
+        }
     }
 
     // MARK: aspect picker
@@ -142,6 +155,21 @@ struct CameraScreen: View {
         } else {
             Task { await model.camera.start() }
         }
+    }
+
+    // MARK: startup mode
+
+    private func openStartupEditorIfNeeded() async {
+        guard !didRouteStartup else { return }
+        didRouteStartup = true
+        guard !ScreenshotMode.isActive,
+              model.settings.startupDestination == .editor else { return }
+
+        // Let RootView finish its splash and the first presentation settle.
+        try? await Task.sleep(nanoseconds: 850_000_000)
+        guard !Task.isCancelled, editor == nil, settingsRequest == nil,
+              galleryRequest == nil, libraryRequest == nil else { return }
+        showStartupImporter = true
     }
 
     // MARK: screenshot scenes

@@ -60,6 +60,27 @@ struct SettingsView: View {
                                       systemImage: "circle.dotted", isOn: $settings.viewfinderGrain)
                     }
 
+                    ControlSection(title: "启动方式", spacing: 14) {
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("启动进入")
+                                    .font(AppFont.ui(15, .medium))
+                                    .foregroundStyle(Theme.text)
+                                Text("修图模式会自动打开系统照片选择器")
+                                    .font(AppFont.ui(12))
+                                    .foregroundStyle(Theme.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            PillSegmented(options: StartupDestination.allCases,
+                                          selection: $settings.startupDestination,
+                                          title: { $0.title })
+                                .frame(width: 138)
+                        }
+                        Text("下次启动 App 时生效；取消选择照片可返回相机")
+                            .font(AppFont.ui(12))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+
                     ControlSection(title: "暗房布局", spacing: 14) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {

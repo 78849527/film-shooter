@@ -53,7 +53,9 @@ struct RootView: View {
 
         // The camera does not need the engine: start both at once so the
         // viewfinder is live as early as possible.
-        Task { await model.camera.start() }
+        if model.settings.startupDestination == .camera || ScreenshotMode.isActive {
+            Task { await model.camera.start() }
+        }
         Task {
             await model.boot()
             if ScreenshotMode.scene == "seed" {
