@@ -31,14 +31,19 @@ struct FilmCarousel: View {
     let films: [FilmStock]
     @Binding var centeredID: String?
     let onTap: (String) -> Void
-    /// The scroll came to rest.
-    let onSettle: () -> Void
+    /// The scroll came to rest. Pass the exact selected film ID rather than
+    /// waiting for SwiftUI's @State centeredID to be applied next frame.
+    let onSettle: (String) -> Void
+    /// In the darkroom, calculate a swipe from its gesture translation,
+    /// independently of delayed iOS 16 ScrollView geometry Preferences.
+    var deterministicSwipe: Bool = false
     /// Prevent stale iOS 16 geometry from overwriting a category selection
     /// while ScrollViewReader moves to the requested film.
     var programmaticTarget: String?
     var programmaticUntil: Date = .distantPast
     var onUserDrag: () -> Void = {}
     @State private var legacyDragging = false
+    @State private var gestureOriginID: String?
 
     var body: some View {
         GeometryReader { geo in
@@ -81,7 +86,7 @@ struct FilmCarousel: View {
                 .scrollTargetBehavior(.viewAligned(limitBehavior: .never))
                 .scrollPosition(id: $centeredID, anchor: .center)
                 .onScrollPhaseChange { _, phase in
-                    if phase == .idle { onSettle() }
+                    if phase == .idle, let id = centeredID { onSettle(id) }
                 }
                 .onAppear {
                     if let id = centeredID { proxy.scrollTo(id, anchor: .center) }
@@ -133,7 +138,7 @@ struct FilmCarousel: View {
                 // Only the user's drag may choose a film from geometry.
                 // Programmatic scrollTo reports old/intermediate coordinates
                 // on iOS 16 and must never overwrite the actual selection.
-                guard legacyDragging else { return }
+                guard legacyDragging, !deterministicSwipe else { return }
                 guard let closest = positions.min(by: {
                     abs($0.value - viewport / 2) < abs($1.value - viewport / 2)
                 })?.key else { return }
@@ -142,20 +147,40 @@ struct FilmCarousel: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 4)
                     .onChanged { _ in
-                        if !legacyDragging { onUserDrag() }
+                        if !legacyDragging {
+                            gestureOriginID = centeredID
+                            onUserDrag()
+                        }
                         legacyDragging = true
                     }
-                    .onEnded { _ in
-                        // Commit at finger-up, not 240ms later. The old delay,
-                        // followed by another 60ms settle, made fast swipes
-                        // reliably develop the previous film.
-                        legacyDragging = false
-                        if let id = centeredID {
-                            withAnimation(.easeOut(duration: 0.16)) {
-                                proxy.scrollTo(id, anchor: .center)
-                            }
+                    .onEnded { drag in
+                        let selected: String?
+                        if deterministicSwipe,
+                           let origin = gestureOriginID ?? centeredID,
+                           let index = films.firstIndex(where: { $0.id == origin }) {
+                            // SwiftUI's preference value is often from the
+                            // previous layout pass on iOS 16. Use the actual
+                            // finished gesture, snapped to a roll step.
+                            let travel = drag.translation.width
+                            let threshold = width * 0.20
+                            let steps = abs(travel) < threshold ? 0
+                                : max(1, Int((abs(travel) / (width + style.gap)).rounded()))
+                            let direction = travel < 0 ? 1 : -1
+                            let next = min(max(index + direction * steps, 0), films.count - 1)
+                            selected = films[next].id
+                        } else {
+                            selected = centeredID
                         }
-                        onSettle()
+                        legacyDragging = false
+                        gestureOriginID = nil
+                        guard let id = selected else { return }
+                        centeredID = id
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                        // Crucially: do not read centeredID back through a
+                        // separate @State owner; deliver this gesture's ID.
+                        onSettle(id)
                     }
             )
             .onAppear {
@@ -251,7 +276,8 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
             FilmCarousel(style: style,
                          films: groupedByKind ? FilmCatalog.films(of: appliedFilm.kind) : FilmCatalog.films,
                          centeredID: $centeredID, onTap: tapCard,
-                         onSettle: settled, programmaticTarget: jumpTarget,
+                         onSettle: { selected in settled(selected) },
+                         deterministicSwipe: groupedByKind, programmaticTarget: jumpTarget,
                          programmaticUntil: jumpUntil, onUserDrag: cancelProgrammaticJump)
                 // Tear down old iOS 16 geometry when the darkroom switches
                 // category. A new category gets an independent scroll list.
@@ -352,9 +378,11 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
 
     /// A user release commits the reel currently under the notch in the same
     /// event. Programmatic movements remain excluded by jumpUntil.
-    private func settled() {
-        guard armed, Date() >= jumpUntil,
-              let id = centeredID, id != committedID else { return }
+    private func settled(_ id: String) {
+        guard armed, Date() >= jumpUntil, id != committedID else { return }
+        // Validate against the visible category before applying a new recipe.
+        // No cross-category finger-up can pick a hidden/old stock.
+        if groupedByKind && FilmCatalog.film(id).kind != appliedFilm.kind { return }
         settleTask?.cancel()
         ownCommit = id
         onCommit(id)
