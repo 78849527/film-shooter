@@ -269,7 +269,7 @@ struct EditorFilmSection: View {
 
     var body: some View {
         let editor = self.editor
-        FilmPicker(style: .compact, committedID: editor.recipe.filmID,
+        FilmPicker(style: .compact, groupedByKind: true, committedID: editor.recipe.filmID,
                    onCommit: { id in
                        editor.selectFilm(id)
                    }) {

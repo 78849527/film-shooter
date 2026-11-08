@@ -26,6 +26,9 @@ struct FilmCarousel: View {
     }
 
     let style: Style
+    /// Editor: only show the film stocks belonging to the applied category.
+    /// Camera: pass the full catalog to preserve existing capture UI.
+    let films: [FilmStock]
     @Binding var centeredID: String?
     let onTap: (String) -> Void
     /// The scroll came to rest.
@@ -47,7 +50,7 @@ struct FilmCarousel: View {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: style.gap) {
-                        ForEach(FilmCatalog.films) { film in
+                        ForEach(films) { film in
                             card(film, width: cardWidth)
                                 .id(film.id)
                                 .visualEffect { content, proxy in
@@ -111,7 +114,7 @@ struct FilmCarousel: View {
         return ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: style.gap) {
-                    ForEach(FilmCatalog.films) { film in
+                    ForEach(films) { film in
                         card(film, width: width)
                             .id(film.id)
                             .background {
@@ -194,6 +197,8 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let style: FilmCarousel.Style
+    /// Limit the list to the committed film's kind in the photo editor only.
+    let groupedByKind: Bool
     let committedID: String
     let onCommit: (String) -> Void
     var onTapCentered: (() -> Void)?
@@ -211,11 +216,12 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
     /// `committedID` must not scroll the carousel).
     @State private var ownCommit: String?
 
-    init(style: FilmCarousel.Style, committedID: String, onCommit: @escaping (String) -> Void,
-         onTapCentered: (() -> Void)? = nil,
+    init(style: FilmCarousel.Style, groupedByKind: Bool = false, committedID: String,
+         onCommit: @escaping (String) -> Void, onTapCentered: (() -> Void)? = nil,
          @ViewBuilder leading: @escaping () -> Leading,
          @ViewBuilder trailing: @escaping () -> Trailing) {
         self.style = style
+        self.groupedByKind = groupedByKind
         self.committedID = committedID
         self.onCommit = onCommit
         self.onTapCentered = onTapCentered
@@ -242,9 +248,14 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
                 .padding(.horizontal, 20)
             }
 
-            FilmCarousel(style: style, centeredID: $centeredID, onTap: tapCard,
+            FilmCarousel(style: style,
+                         films: groupedByKind ? FilmCatalog.films(of: appliedFilm.kind) : FilmCatalog.films,
+                         centeredID: $centeredID, onTap: tapCard,
                          onSettle: settled, programmaticTarget: jumpTarget,
                          programmaticUntil: jumpUntil, onUserDrag: cancelProgrammaticJump)
+                // Tear down old iOS 16 geometry when the darkroom switches
+                // category. A new category gets an independent scroll list.
+                .id(groupedByKind ? appliedFilm.kind.rawValue : "all")
                 .opacity(dimmed ? 0 : 1)
 
             HStack(spacing: 10) {
@@ -285,9 +296,10 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
     }
 
     private func tapCard(_ id: String) {
-        if id == centeredID {
+        if id == committedID {
             onTapCentered?()
         } else {
+            // Centered-but-not-applied is still a selectable film.
             jump(to: id, haptic: true, commit: true)
         }
     }
