@@ -14,6 +14,7 @@ struct EditorView: View {
     @State private var sent = false
     @State private var isSharing = false
     @State private var shareRequest: DarkroomShareRequest?
+    @State private var showSettings = false
     @State private var editingPriorityActive = false
 
     var body: some View {
@@ -23,10 +24,15 @@ struct EditorView: View {
                           isSharing: isSharing,
                           onBack: { dismiss() },
                           onDevelop: develop,
-                          onShare: developAndShare)
+                          onShare: developAndShare,
+                          onSettings: { showSettings = true })
             .background(Color.black.ignoresSafeArea())
             .sheet(item: $shareRequest, onDismiss: { dismiss() }) { request in
                 DarkroomActivitySheet(items: [request.url])
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView(settings: model.settings)
+                    .environmentObject(model)
             }
             .onAppear {
                 // This is the only full-screen view that allows landscape.
