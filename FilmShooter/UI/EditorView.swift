@@ -12,15 +12,22 @@ struct EditorView: View {
     @ObservedObject var editor: EditorModel
 
     @State private var sent = false
+    @State private var isSharing = false
+    @State private var shareRequest: DarkroomShareRequest?
     @State private var editingPriorityActive = false
 
     var body: some View {
         DarkroomWorkspace(editor: editor,
                           settings: model.settings,
                           sent: sent,
-                          onCancel: { dismiss() },
-                          onDevelop: develop)
+                          isSharing: isSharing,
+                          onBack: { dismiss() },
+                          onDevelop: develop,
+                          onShare: developAndShare)
             .background(Color.black.ignoresSafeArea())
+            .sheet(item: $shareRequest, onDismiss: { dismiss() }) { request in
+                DarkroomActivitySheet(items: [request.url])
+            }
             .onAppear {
                 // This is the only full-screen view that allows landscape.
                 // The camera and other root views remain portrait.
@@ -57,7 +64,52 @@ struct EditorView: View {
             dismiss()
         }
     }
+
+    /// Share the ACTUAL developed file, not a 1600px on-screen preview.
+    /// Waiting on the exact job UUID avoids accidentally sharing a previous
+    /// gallery image when another camera job finishes first.
+    private func developAndShare() {
+        guard editor.canDevelop, !sent else { return }
+        Haptics.filmAdvance()
+        let jobID = editor.develop(into: model.darkroom, frameNumber: model.frameNumber)
+        sent = true
+        isSharing = true
+
+        Task {
+            do {
+                let photo = try await model.darkroom.waitForCompletion(of: jobID)
+                let url = model.library.fileURL(for: photo)
+                guard FileManager.default.fileExists(atPath: url.path) else {
+                    throw CocoaError(.fileNoSuchFile)
+                }
+                isSharing = false
+                shareRequest = DarkroomShareRequest(url: url)
+            } catch {
+                isSharing = false
+                model.show("冲洗并分享失败：\(error.localizedDescription)", seconds: 4)
+                dismiss()
+            }
+        }
+    }
 }
+
+/// The share sheet is presented after the darkroom confirms the exact
+/// full-resolution print has been committed to the app's photo library.
+private struct DarkroomShareRequest: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct DarkroomActivitySheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
 
 // MARK: - Film section
 
