@@ -217,6 +217,11 @@ final class AppModel: ObservableObject {
     /// Bring the viewfinder table in line with the recipe: instantly from the
     /// cache, otherwise bake (only the latest request matters).
     private func refreshLUT() {
+        // Cancel previous selection work before looking up a cached table:
+        // cached film/paper pairs must not wait on a stale background bake.
+        lutTask?.cancel()
+        lutTask = nil
+        luts.cancelPrebake()
         if let cached = luts.cached(for: recipe) {
             lut = cached
             isBakingLUT = false
@@ -224,12 +229,11 @@ final class AppModel: ObservableObject {
             return
         }
         guard engineState == .ready else { return }
-        lutTask?.cancel()
         let wanted = recipe
         isBakingLUT = true
         lutTask = Task { [weak self] in
-            // Let a fast scroll through the carousel settle before baking.
-            try? await Task.sleep(nanoseconds: 90_000_000)
+            // The carousel already commits intentionally; the extra 90ms
+            // debounce delayed film switching without improving correctness.
             guard let self, !Task.isCancelled else { return }
             do {
                 let t0 = Date()

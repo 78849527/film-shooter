@@ -716,6 +716,8 @@ struct ViewfinderLCD: View {
                             .fill(Theme.lcd)
                             .frame(width: 5, height: 5)
                             .compatiblePulse([0.25, 1.0], duration: 0.55)
+                        Text("胶片预览更新中")
+                            .lcdText(10)
                     }
                     if showsEV {
                         Text(String(format: "EV %+.1f", bias))
