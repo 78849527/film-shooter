@@ -2,6 +2,15 @@ import SwiftUI
 
 // MARK: - Carousel
 
+/// The horizontal positions of carousel cards in iOS 16's scroll view.
+private struct LegacyFilmCenterPreference: PreferenceKey {
+    static var defaultValue: [String: CGFloat] { [:] }
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+
 /// A snapping, horizontally scrolling row of film canisters. The centred roll
 /// is full size; the others shrink and fade with their distance from the
 /// centre (pure transforms: no layout, no offscreen passes, so it holds
@@ -21,9 +30,11 @@ struct FilmCarousel: View {
     let onTap: (String) -> Void
     /// The scroll came to rest.
     let onSettle: () -> Void
+    @State private var legacyDragging = false
 
     var body: some View {
         GeometryReader { geo in
+            if #available(iOS 18.0, *) {
             let viewport = geo.size.width
             let cardWidth = FilmCanister.width(forHeight: style.cardHeight)
             let step = cardWidth + style.gap
@@ -74,6 +85,9 @@ struct FilmCarousel: View {
                     if let id = centeredID { proxy.scrollTo(id, anchor: .center) }
                 }
             }
+            } else {
+                legacyCarousel(viewport: geo.size.width)
+            }
         }
         .frame(height: style.height)
         .overlay(alignment: .bottom) {
@@ -81,6 +95,63 @@ struct FilmCarousel: View {
                 .fill(Theme.accent)
                 .frame(width: 14, height: 2)
                 .allowsHitTesting(false)
+        }
+    }
+
+
+    /// iOS 16 fallback: use geometry preferences and ScrollViewReader instead
+    /// of iOS 17/18 scroll-position APIs. It still centers the chosen roll.
+    private func legacyCarousel(viewport: CGFloat) -> some View {
+        let width = FilmCanister.width(forHeight: style.cardHeight)
+        return ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: style.gap) {
+                    ForEach(FilmCatalog.films) { film in
+                        card(film, width: width)
+                            .id(film.id)
+                            .background {
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: LegacyFilmCenterPreference.self,
+                                        value: [film.id: geo.frame(in: .named("LegacyFilmCarousel")).midX])
+                                }
+                            }
+                    }
+                }
+                .padding(.horizontal, max(0, (viewport - width) / 2))
+            }
+            .coordinateSpace(name: "LegacyFilmCarousel")
+            .onPreferenceChange(LegacyFilmCenterPreference.self) { positions in
+                guard let closest = positions.min(by: {
+                    abs($0.value - viewport / 2) < abs($1.value - viewport / 2)
+                })?.key else { return }
+                if centeredID != closest { centeredID = closest }
+            }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { _ in legacyDragging = true }
+                    .onEnded { _ in
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 240_000_000)
+                            legacyDragging = false
+                            if let id = centeredID {
+                                withAnimation(.easeOut(duration: 0.22)) {
+                                    proxy.scrollTo(id, anchor: .center)
+                                }
+                            }
+                            onSettle()
+                        }
+                    }
+            )
+            .onAppear {
+                if let id = centeredID { proxy.scrollTo(id, anchor: .center) }
+            }
+            .compatibleOnChange(of: centeredID) { _, selected in
+                guard !legacyDragging, let selected else { return }
+                withAnimation(Motion.standard) {
+                    proxy.scrollTo(selected, anchor: .center)
+                }
+            }
         }
     }
 
@@ -169,8 +240,8 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
             }
             .padding(.horizontal, 16)
         }
-        .onChange(of: centeredID) { _, new in centeredChanged(new) }
-        .onChange(of: committedID) { _, new in
+        .compatibleOnChange(of: centeredID) { _, new in centeredChanged(new) }
+        .compatibleOnChange(of: committedID) { _, new in
             if new == ownCommit {
                 ownCommit = nil
                 return
