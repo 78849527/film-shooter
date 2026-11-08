@@ -28,6 +28,7 @@ struct RecipeControls: View {
                     PaperPicker(film: film, selection: Binding(
                         get: { recipe.resolvedPaperID },
                         set: { recipe.paperID = $0 }))
+                        .id(film.id)
                 }
                 ControlSection(title: "放大机", spacing: 14) {
                     FilmSlider(title: "亮度", value: $recipe.printBrightness, range: -2...2,
@@ -77,7 +78,6 @@ struct RecipeControls: View {
                               systemImage: "calendar", isOn: $recipe.dateStamp)
             }
         }
-        .animation(Motion.standard, value: film.kind)
     }
 }
 
@@ -152,7 +152,6 @@ struct PrintSettingsSheet: View {
     private static let compact = PresentationDetent.height(360)
 
     var body: some View {
-        @ObservedObject var model = model
         VStack(spacing: 0) {
             header
             ScrollView {

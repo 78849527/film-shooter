@@ -36,9 +36,6 @@ struct FilmCarousel: View {
     var programmaticUntil: Date = .distantPast
     var onUserDrag: () -> Void = {}
     @State private var legacyDragging = false
-    /// Prevent deceleration geometry from replacing the selected film after
-    /// releasing a gesture and programmatically snapping it to the centre.
-    @State private var snapUntil = Date.distantPast
 
     var body: some View {
         GeometryReader { geo in
@@ -130,15 +127,10 @@ struct FilmCarousel: View {
             }
             .coordinateSpace(name: "LegacyFilmCarousel")
             .onPreferenceChange(LegacyFilmCenterPreference.self) { positions in
-                // scrollTo is asynchronous: during a category jump, geometry
-                // initially still describes the PREVIOUS visible film.
-                // Accept user-drag movement, but not stale programmatic positions.
-                if !legacyDragging, Date() < snapUntil {
-                    return
-                }
-                if !legacyDragging, programmaticTarget != nil, Date() < programmaticUntil {
-                    return
-                }
+                // Only the user's drag may choose a film from geometry.
+                // Programmatic scrollTo reports old/intermediate coordinates
+                // on iOS 16 and must never overwrite the actual selection.
+                guard legacyDragging else { return }
                 guard let closest = positions.min(by: {
                     abs($0.value - viewport / 2) < abs($1.value - viewport / 2)
                 })?.key else { return }
@@ -155,7 +147,6 @@ struct FilmCarousel: View {
                         // followed by another 60ms settle, made fast swipes
                         // reliably develop the previous film.
                         legacyDragging = false
-                        snapUntil = Date().addingTimeInterval(0.4)
                         if let id = centeredID {
                             withAnimation(.easeOut(duration: 0.16)) {
                                 proxy.scrollTo(id, anchor: .center)
@@ -170,7 +161,6 @@ struct FilmCarousel: View {
             .compatibleOnChange(of: programmaticTarget) { _, target in
                 if target != nil {
                     legacyDragging = false
-                    snapUntil = Date().addingTimeInterval(0.4)
                 }
             }
             .compatibleOnChange(of: centeredID) { _, selected in
@@ -234,16 +224,18 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
         _centeredID = State(initialValue: committedID)
     }
 
-    private var centeredFilm: FilmStock { FilmCatalog.film(centeredID ?? committedID) }
+    /// The applied recipe is the single authority for labels and category.
+    /// centeredID is a scroll candidate, never the developed film.
+    private var appliedFilm: FilmStock { FilmCatalog.film(committedID) }
 
     var body: some View {
         VStack(spacing: 6) {
             if style == .hero {
-                FilmTitleBlock(film: centeredFilm, style: style)
+                FilmTitleBlock(film: appliedFilm, style: style)
                     .padding(.horizontal, 20)
             } else {
                 HStack(spacing: 12) {
-                    FilmTitleBlock(film: centeredFilm, style: style)
+                    FilmTitleBlock(film: appliedFilm, style: style)
                     Spacer(minLength: 4)
                     trailing()
                 }
@@ -257,8 +249,11 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
 
             HStack(spacing: 10) {
                 leading()
-                KindChips(current: centeredFilm.kind, compact: style == .compact) { kind in
-                    if let first = FilmCatalog.films(of: kind).first, first.kind != centeredFilm.kind {
+                KindChips(current: appliedFilm.kind, compact: style == .compact) { kind in
+                    // The browsing scroll position can already be in this
+                    // category while the applied recipe is still the old kind.
+                    guard let first = FilmCatalog.films(of: kind).first else { return }
+                    if committedID != first.id {
                         jump(to: first.id, haptic: true, commit: true)
                     }
                 }
@@ -279,10 +274,9 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
             jump(to: new, haptic: false, commit: false)
         }
         .task {
-            // Ignore the scroll view's own settling on first layout.
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            // Don't apply an initial-film value captured 350ms before a
+            // category press. The first carousel onAppear handles alignment.
             armed = true
-            if centeredID != committedID { jump(to: committedID, haptic: false, commit: false) }
         }
         .onDisappear {
             settleTask?.cancel()
@@ -298,32 +292,31 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
         }
     }
 
-    /// Commit a button choice immediately. On iOS 16 the legacy carousel
-    /// needs a short geometry lock until its programmatic scroll catches up.
+    /// Scroll and apply one film + paper selection in the same event.
     private func jump(to id: String, haptic: Bool, commit: Bool) {
         settleTask?.cancel()
+        jumpTask?.cancel()
         jumpTarget = id
         jumpUntil = Date().addingTimeInterval(0.85)
-        jumpTask?.cancel()
         if haptic { Haptics.selection() }
-
-        // The button's effect is synchronous; it does not depend on scroll
-        // animation completion or a delayed settle callback.
-        if commit, id != committedID {
-            ownCommit = id
-            onCommit(id)
-        }
 
         let films = FilmCatalog.films
         let from = films.firstIndex { $0.id == centeredID } ?? 0
         let to = films.firstIndex { $0.id == id } ?? 0
-        if abs(to - from) > 4 {
-            // Jump to distant kinds without a long delayed traverse.
-            var still = Transaction()
-            still.disablesAnimations = true
-            withTransaction(still) { centeredID = id }
+        let crossingKind = FilmCatalog.film(id).kind != appliedFilm.kind
+        if crossingKind || abs(to - from) > 4 {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { centeredID = id }
         } else {
-            withAnimation(Motion.pick(Motion.standard, reduceMotion: reduceMotion)) { centeredID = id }
+            withAnimation(Motion.pick(Motion.standard, reduceMotion: reduceMotion)) {
+                centeredID = id
+            }
+        }
+
+        if commit, id != committedID {
+            ownCommit = id
+            onCommit(id)
         }
     }
 

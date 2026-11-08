@@ -50,6 +50,15 @@ final class EditorModel: ObservableObject, Identifiable {
     @Published private(set) var lastRenderMS: Double = 0
 
     var film: FilmStock { recipe.film }
+
+    /// Commit the new film and its default paper with one recipe write.
+    func selectFilm(_ id: String) {
+        guard id != recipe.filmID else { return }
+        var updated = recipe
+        updated.selectFilm(id)
+        recipe = updated
+    }
+
     var previewMatchesSelection: Bool { preview != nil && previewRecipe == recipe }
     // Do not let a render request be exported before its film + paper have
     // actually appeared in the preview the user approved.

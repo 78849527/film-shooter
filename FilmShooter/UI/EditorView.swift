@@ -271,8 +271,7 @@ struct EditorFilmSection: View {
         let editor = self.editor
         FilmPicker(style: .compact, committedID: editor.recipe.filmID,
                    onCommit: { id in
-                       guard id != editor.recipe.filmID else { return }
-                       editor.recipe.selectFilm(id)
+                       editor.selectFilm(id)
                    }) {
             EmptyView()
         } trailing: {
