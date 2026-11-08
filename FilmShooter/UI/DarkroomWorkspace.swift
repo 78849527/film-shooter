@@ -12,6 +12,7 @@ struct DarkroomWorkspace: View {
     let onBack: () -> Void
     let onDevelop: () -> Void
     let onShare: () -> Void
+    let onSettings: () -> Void
 
     @State private var filmPanelOpen = false
     @State private var chromeHidden = false
@@ -43,17 +44,13 @@ struct DarkroomWorkspace: View {
                 .padding(landscape ? 3 : 1)
 
                 if !chromeHidden {
-                    topBar(isLandscape: landscape)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .zIndex(2)
-
                     filmLabel
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                         .padding(.top, 54)
                         .zIndex(1)
 
                     if !filmPanelOpen {
-                        sideRail
+                        sideRail(isLandscape: landscape)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .zIndex(2)
                     }
@@ -95,34 +92,6 @@ struct DarkroomWorkspace: View {
         .compatibleOnChange(of: rightHanded) { _, _ in resetPanelPosition() }
     }
 
-    private func topBar(isLandscape: Bool) -> some View {
-        HStack(spacing: 12) {
-            Spacer()
-
-            Button {
-                if isLandscape {
-                    EditorOrientation.rotateToPortrait()
-                } else {
-                    EditorOrientation.rotateToLandscape()
-                }
-            } label: {
-                Image(systemName: isLandscape ? "iphone" : "rotate.right")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(Theme.text)
-                    .frame(width: 42, height: 42)
-                    .background(.black.opacity(0.5), in: Capsule())
-            }
-            .accessibilityLabel(isLandscape ? "切换竖屏查看" : "横屏查看")
-        }
-        .buttonStyle(.pressable)
-        .padding(.horizontal, 12)
-        .padding(.top, 2)
-        .background(LinearGradient(
-            colors: [.black.opacity(0.65), .black.opacity(0)],
-            startPoint: .top, endPoint: .bottom
-        ))
-    }
-
     private var filmLabel: some View {
         HStack(spacing: 6) {
             if rightHanded {
@@ -162,7 +131,7 @@ struct DarkroomWorkspace: View {
 
     /// Primary controls stay accessible without opening the film panel.
     /// Return cancels; Share initiates the real full-resolution development.
-    private var sideRail: some View {
+    private func sideRail(isLandscape: Bool) -> some View {
         HStack(spacing: 0) {
             if rightHanded { Spacer(minLength: 0) }
             VStack(spacing: 8) {
@@ -173,6 +142,15 @@ struct DarkroomWorkspace: View {
                 })
                 railButton(title: "分享", symbol: "square.and.arrow.up", enabled: editor.canDevelop, action: onShare)
                 railButton(title: "返回", symbol: "chevron.backward", action: onBack)
+                railButton(title: "设置", symbol: "gearshape", action: onSettings)
+                railButton(title: isLandscape ? "竖屏" : "横屏",
+                           symbol: isLandscape ? "iphone" : "rotate.right", action: {
+                    if isLandscape {
+                        EditorOrientation.rotateToPortrait()
+                    } else {
+                        EditorOrientation.rotateToLandscape()
+                    }
+                })
             }
             .padding(.horizontal, 5)
             .padding(.vertical, 7)
@@ -241,10 +219,7 @@ struct DarkroomWorkspace: View {
                 }
 
             VStack(spacing: 0) {
-                panelHeader
-                    .contentShape(Rectangle())
-                    .gesture(panelDragGesture(in: available, panelWidth: panelWidth,
-                                              panelHeight: panelHeight))
+                panelHeader(in: available, panelWidth: panelWidth, panelHeight: panelHeight)
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 9) {
@@ -279,34 +254,21 @@ struct DarkroomWorkspace: View {
         floatingDragStart = .zero
     }
 
-    /// Dragging begins ONLY after a long press on the header. Regular short
-    /// swipes on the stock carousel or sliders are never intercepted.
-    private func panelDragGesture(in available: CGSize, panelWidth: CGFloat,
-                                  panelHeight: CGFloat) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.38)
-            .sequenced(before: DragGesture(minimumDistance: 0))
-            .onChanged { phase in
-                switch phase {
-                case .second(true, let drag):
-                    if !panelFloating {
-                        panelFloating = true
-                        floatingDragStart = floatingOffset
-                        Haptics.selection()
-                    }
-                    if let drag {
-                        let proposed = CGSize(
-                            width: floatingDragStart.width + drag.translation.width,
-                            height: floatingDragStart.height + drag.translation.height
-                        )
-                        floatingOffset = constrainedPanelOffset(proposed, in: available,
-                                                                 panelWidth: panelWidth,
-                                                                 panelHeight: panelHeight)
-                    }
-                default:
-                    break
-                }
-            }
-            .onEnded { _ in floatingDragStart = floatingOffset }
+    /// UIKit owns this gesture for its entire lifecycle, even when SwiftUI
+    /// updates floatingOffset on every move. That avoids iOS 16 losing the
+    /// combined LongPressGesture.sequenced(DragGesture) state and freezing.
+    private func movePanel(_ translation: CGSize, in available: CGSize,
+                           panelWidth: CGFloat, panelHeight: CGFloat) {
+        if !panelFloating {
+            panelFloating = true
+            floatingDragStart = floatingOffset
+            Haptics.selection()
+        }
+        let target = CGSize(width: floatingDragStart.width + translation.width,
+                            height: floatingDragStart.height + translation.height)
+        floatingOffset = constrainedPanelOffset(target, in: available,
+                                                panelWidth: panelWidth,
+                                                panelHeight: panelHeight)
     }
 
     private func constrainedPanelOffset(_ proposed: CGSize, in available: CGSize,
@@ -319,7 +281,8 @@ struct DarkroomWorkspace: View {
                       height: min(0, max(yMin, proposed.height)))
     }
 
-    private var panelHeader: some View {
+    private func panelHeader(in available: CGSize, panelWidth: CGFloat,
+                             panelHeight: CGFloat) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Label("胶片", systemImage: "camera.filters")
@@ -329,6 +292,16 @@ struct DarkroomWorkspace: View {
                     .foregroundStyle(Theme.secondary)
             }
             .foregroundStyle(Theme.text)
+            .frame(minWidth: 138, minHeight: 33, alignment: .leading)
+            .overlay {
+                DarkroomPanelDragHandle(
+                    onMove: { delta in
+                        movePanel(delta, in: available, panelWidth: panelWidth,
+                                  panelHeight: panelHeight)
+                    },
+                    onEnd: { floatingDragStart = floatingOffset }
+                )
+            }
             Spacer()
             Button {
                 withAnimation(.easeOut(duration: 0.18)) { filmPanelOpen = false }
@@ -551,5 +524,66 @@ struct DarkroomZoomCanvas: View {
         let maxY = max(0, (fitted.height * scale - container.height) / 2)
         return CGSize(width: LayoutMath.clamp(proposed.width, -maxX, maxX),
                       height: LayoutMath.clamp(proposed.height, -maxY, maxY))
+    }
+}
+
+
+/// A stable UIKit recognizer handles a continuous press-and-drag on iOS 16.
+/// The recognizer lives on its own UIView and isn't replaced when the panel
+/// changes its SwiftUI state/position while the finger is down.
+private struct DarkroomPanelDragHandle: UIViewRepresentable {
+    let onMove: (CGSize) -> Void
+    let onEnd: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onMove: onMove, onEnd: onEnd)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        let gesture = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handle(_:))
+        )
+        gesture.minimumPressDuration = 0.38
+        gesture.allowableMovement = 22
+        gesture.cancelsTouchesInView = true
+        view.addGestureRecognizer(gesture)
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.onMove = onMove
+        context.coordinator.onEnd = onEnd
+    }
+
+    final class Coordinator: NSObject {
+        var onMove: (CGSize) -> Void
+        var onEnd: () -> Void
+        private var start: CGPoint?
+
+        init(onMove: @escaping (CGSize) -> Void, onEnd: @escaping () -> Void) {
+            self.onMove = onMove
+            self.onEnd = onEnd
+        }
+
+        @objc func handle(_ recognizer: UILongPressGestureRecognizer) {
+            let position = recognizer.location(in: recognizer.view?.window)
+            switch recognizer.state {
+            case .began:
+                start = position
+                onMove(.zero)
+            case .changed:
+                guard let start else { return }
+                onMove(CGSize(width: position.x - start.x,
+                              height: position.y - start.y))
+            case .ended, .cancelled, .failed:
+                start = nil
+                onEnd()
+            default:
+                break
+            }
+        }
     }
 }
