@@ -1,30 +1,9 @@
 import SwiftUI
 import UIKit
 
-private enum AdjustmentCategory: String, CaseIterable, Identifiable {
-    case light, color, texture, finish
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .light: return "光线"
-        case .color: return "颜色"
-        case .texture: return "质感"
-        case .finish: return "成片"
-        }
-    }
-    var symbol: String {
-        switch self {
-        case .light: return "sun.max"
-        case .color: return "thermometer.medium"
-        case .texture: return "circle.dotted"
-        case .finish: return "photo"
-        }
-    }
-}
-
-/// Image-first main-app darkroom. A compact two-row dock stays at the bottom;
-/// adjustment values appear in a translucent three-row tray on demand.
+/// Image-first main-app darkroom. A SINGLE half-height translucent film panel
+/// contains stock, paper and all print controls. It docks to the preferred
+/// hand's lower side and does not reserve any permanent image space.
 struct DarkroomWorkspace: View {
     @ObservedObject var editor: EditorModel
     @ObservedObject var settings: AppSettings
@@ -38,8 +17,6 @@ struct DarkroomWorkspace: View {
     @State private var filmPanelOpen = false
     @State private var chromeHidden = false
     @State private var resetZoomToken = 0
-    @State private var selectedAdjustment: AdjustmentCategory?
-    @State private var compareOriginal = false
     /// Long press first unlocks floating mode. A separate pan then moves it,
     /// so the panel never relocates while its activation touch is being tracked.
     @State private var panelFloating = false
@@ -54,8 +31,7 @@ struct DarkroomWorkspace: View {
             ZStack {
                 Color.black
 
-                DarkroomZoomCanvas(editor: editor, resetToken: $resetZoomToken,
-                                   compareOriginal: $compareOriginal) {
+                DarkroomZoomCanvas(editor: editor, resetToken: $resetZoomToken) {
                     withAnimation(.easeOut(duration: 0.18)) {
                         if filmPanelOpen {
                             filmPanelOpen = false
@@ -79,7 +55,7 @@ struct DarkroomWorkspace: View {
                             .zIndex(2)
                     }
 
-                    bottomDock
+                    bottomTools
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                         .zIndex(1)
 
@@ -203,213 +179,36 @@ struct DarkroomWorkspace: View {
         .accessibilityLabel(title == "分享" ? "高清冲印后分享照片" : title)
     }
 
-    /// Lightroom-style bottom dock: two persistent rows, with a compact
-    /// three-control tray shown only for the selected adjustment category.
-    private var bottomDock: some View {
-        VStack(spacing: 0) {
-            if let selectedAdjustment {
-                adjustmentTray(selectedAdjustment)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-            adjustmentCategories
-            quickTools
-        }
-        .padding(.bottom, 8)
-        .background(.black.opacity(0.76))
-        .animation(.easeOut(duration: 0.18), value: selectedAdjustment)
-    }
-
-    private var adjustmentCategories: some View {
-        HStack(spacing: 0) {
-            ForEach(AdjustmentCategory.allCases) { category in
-                Button {
-                    Haptics.selection()
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        selectedAdjustment = selectedAdjustment == category ? nil : category
-                    }
-                } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: category.symbol)
-                            .font(.system(size: 15, weight: .medium))
-                            .frame(height: 18)
-                        Text(category.title)
-                            .font(AppFont.ui(10, .medium))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .foregroundStyle(selectedAdjustment == category ? Theme.text : Theme.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .contentShape(Rectangle())
-                    .overlay(alignment: .bottom) {
-                        if selectedAdjustment == category {
-                            Capsule().fill(Theme.accent).frame(width: 22, height: 2).padding(.bottom, 2)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 5)
-        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.09)).frame(height: 1) }
-    }
-
-    /// Existing, real editor actions only; no placeholder Lightroom tools.
-    private var quickTools: some View {
-        HStack(spacing: 0) {
-            quickTool("原图", symbol: "circle.lefthalf.filled", active: compareOriginal) {
-                compareOriginal.toggle()
-                Haptics.softTap(0.45)
-            }
-            quickTool("复位", symbol: "arrow.counterclockwise", active: false,
-                      enabled: selectedAdjustment != nil, action: resetSelectedAdjustment)
-            quickTool("适合", symbol: "arrow.up.left.and.arrow.down.right", active: false) {
+    private var bottomTools: some View {
+        HStack(spacing: 8) {
+            Text("单击隐藏 · 双击放大 · 长按原图")
+                .font(AppFont.ui(10))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .foregroundStyle(.white.opacity(0.8))
+            Spacer(minLength: 5)
+            Button {
                 resetZoomToken &+= 1
-            }
-            quickTool("冲印", symbol: "drop.fill", active: false, enabled: editor.canDevelop && !sent, action: onDevelop)
-        }
-        .padding(.horizontal, 5)
-        .padding(.top, 2)
-    }
-
-    private func quickTool(_ title: String, symbol: String, active: Bool,
-                           enabled: Bool = true, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: symbol).font(.system(size: 15, weight: .medium)).frame(height: 18)
-                Text(title).font(AppFont.ui(10, .medium)).lineLimit(1)
-            }
-            .foregroundStyle(active ? Theme.accent : Theme.text.opacity(enabled ? 0.9 : 0.38))
-            .frame(maxWidth: .infinity, minHeight: 43)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-    }
-
-    private func resetSelectedAdjustment() {
-        guard let selectedAdjustment else { return }
-        var recipe = editor.recipe
-        switch selectedAdjustment {
-        case .light:
-            recipe.exposureEV = 0
-            recipe.autoExposure = false
-            recipe.printBrightness = 0
-        case .color:
-            recipe.warmth = 0
-            recipe.tint = 0
-            recipe.paperID = recipe.film.defaultPaper
-        case .texture:
-            recipe.grain = 1
-            recipe.halation = 1
-            recipe.format = .mm35
-        case .finish:
-            recipe.filmEdge = false
-            recipe.dateStamp = false
-        }
-        editor.recipe = recipe
-        Haptics.selection()
-    }
-
-    /// Three dense rows mirror the reference: small labels, thin tracks and
-    /// tight vertical rhythm inside a translucent tray.
-    @ViewBuilder
-    private func adjustmentTray(_ category: AdjustmentCategory) -> some View {
-        VStack(spacing: 2) {
-            switch category {
-            case .light:
-                FilmSlider(title: "曝光", value: $editor.recipe.exposureEV, range: -3...3,
-                           defaultValue: 0, format: FilmSlider.ev, compact: true)
-                compactToggle("自动测光", isOn: $editor.recipe.autoExposure)
-                FilmSlider(title: "放大机亮度", value: $editor.recipe.printBrightness, range: -2...2,
-                           defaultValue: 0, leadingLabel: "暗", trailingLabel: "亮",
-                           format: FilmSlider.ev, compact: true)
-                    .disabled(!editor.recipe.film.kind.usesPrintPaper)
-            case .color:
-                FilmSlider(title: "冷暖", value: $editor.recipe.warmth, range: -1...1,
-                           defaultValue: 0, leadingLabel: "冷", trailingLabel: "暖",
-                           format: FilmSlider.signed, compact: true)
-                    .disabled(!editor.recipe.film.kind.usesPrintPaper)
-                FilmSlider(title: "品绿", value: $editor.recipe.tint, range: -1...1,
-                           defaultValue: 0, leadingLabel: "绿", trailingLabel: "品",
-                           format: FilmSlider.signed, compact: true)
-                    .disabled(!editor.recipe.film.kind.usesPrintPaper)
-                paperMenuRow
-            case .texture:
-                FilmSlider(title: "颗粒", value: $editor.recipe.grain, range: 0...2,
-                           defaultValue: 1, format: FilmSlider.times, compact: true)
-                FilmSlider(title: "光晕", value: $editor.recipe.halation, range: 0...3,
-                           defaultValue: 1, format: FilmSlider.times, compact: true)
-                HStack(spacing: 8) {
-                    Text("底片尺寸").font(AppFont.ui(11, .medium)).foregroundStyle(Theme.text)
-                    Spacer(minLength: 4)
-                    PillSegmented(options: FilmFormat.allCases, selection: $editor.recipe.format,
-                                  title: { $0.title }).frame(width: 112, height: 28)
-                }
-                .frame(height: 31)
-            case .finish:
-                compactToggle("胶片边框", isOn: $editor.recipe.filmEdge)
-                compactToggle("日期印", isOn: $editor.recipe.dateStamp)
-                FilmSlider(title: "成片亮度", value: $editor.recipe.printBrightness, range: -2...2,
-                           defaultValue: 0, format: FilmSlider.ev, compact: true)
-                    .disabled(!editor.recipe.film.kind.usesPrintPaper)
-            }
-        }
-        .padding(.horizontal, 13)
-        .padding(.top, 8)
-        .padding(.bottom, 7)
-        .background(.ultraThinMaterial)
-        .background(Color.black.opacity(0.62))
-        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.1)).frame(height: 1) }
-    }
-
-    private func compactToggle(_ title: String, isOn: Binding<Bool>) -> some View {
-        Toggle(isOn: isOn) {
-            Text(title).font(AppFont.ui(11, .medium)).foregroundStyle(Theme.text)
-        }
-        .tint(Theme.accent)
-        .controlSize(.mini)
-        .frame(height: 31)
-    }
-
-    private var paperMenuRow: some View {
-        HStack(spacing: 6) {
-            Text("相纸").font(AppFont.ui(11, .medium)).foregroundStyle(Theme.text)
-            Spacer(minLength: 4)
-            Menu {
-                ForEach(FilmCatalog.papers(for: editor.recipe.film)) { paper in
-                    Button {
-                        editor.recipe.paperID = paper.id
-                    } label: {
-                        if editor.recipe.resolvedPaperID == paper.id {
-                            Label(paper.name, systemImage: "checkmark")
-                        } else {
-                            Text(paper.name)
-                        }
-                    }
-                }
             } label: {
-                HStack(spacing: 5) {
-                    Text(editor.recipe.film.kind.usesPrintPaper
-                         ? (FilmCatalog.paper(editor.recipe.resolvedPaperID)?.name ?? "选择相纸")
-                         : "反转片")
-                        .font(AppFont.ui(10, .medium)).lineLimit(1)
-                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
-                }
-                .foregroundStyle(Theme.text)
-                .padding(.horizontal, 8).frame(height: 27)
-                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                Label("适合屏幕", systemImage: "arrow.down.right.and.arrow.up.left")
+                    .font(AppFont.ui(11, .medium))
+                    .foregroundStyle(Theme.text)
             }
-            .disabled(!editor.recipe.film.kind.usesPrintPaper)
+            .buttonStyle(.pressable)
         }
-        .frame(height: 31)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.5))
     }
 
     private func filmPanel(in available: CGSize) -> some View {
         let landscape = available.width > available.height
+        // Landscape gets a tall panel (86% of the usable height); portrait
+        // keeps the original half-height panel for maximum photo visibility.
         let panelWidth = landscape
             ? min(400, available.width * 0.46)
             : min(350, available.width * 0.84)
-        let panelHeight = min(190, available.height * (landscape ? 0.72 : 0.34))
+        let panelHeight = available.height * (landscape ? 0.86 : 0.50)
 
         return ZStack(alignment: rightHanded ? .bottomTrailing : .bottomLeading) {
             Color.clear
@@ -422,9 +221,18 @@ struct DarkroomWorkspace: View {
             VStack(spacing: 0) {
                 panelHeader(in: available, panelWidth: panelWidth, panelHeight: panelHeight)
 
-                EditorFilmSection(editor: editor)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 5)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 9) {
+                        EditorFilmSection(editor: editor)
+                            .padding(.horizontal, 3)
+                        RecipeControls(recipe: $editor.recipe, showsExposure: true, compact: true)
+                            .padding(.horizontal, 6)
+                    }
+                    .padding(.top, 2)
+                }
+                .scrollIndicators(.hidden)
+
+                panelActions
             }
             .frame(width: panelWidth, height: panelHeight)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17))
@@ -516,6 +324,24 @@ struct DarkroomWorkspace: View {
         .padding(.vertical, 7)
     }
 
+    /// Inner panel has only the print action; return and share stay in the
+    /// primary side rail so they are available without opening the panel.
+    private var panelActions: some View {
+        Button(action: onDevelop) {
+            Label("冲印", systemImage: "drop.fill")
+                .font(AppFont.ui(13, .semibold))
+                .foregroundStyle(Theme.text)
+                .frame(maxWidth: .infinity, minHeight: 42)
+                .background(editor.canDevelop ? Theme.accent.opacity(0.36) :
+                            .white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        }
+        .disabled(!editor.canDevelop || sent)
+        .buttonStyle(.pressable)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(.black.opacity(0.23))
+    }
+
 }
 
 /// Pinch, pan, double tap and hold-to-compare share a single image transform.
@@ -524,7 +350,6 @@ struct DarkroomWorkspace: View {
 struct DarkroomZoomCanvas: View {
     @ObservedObject var editor: EditorModel
     @Binding var resetToken: Int
-    @Binding var compareOriginal: Bool
     let onTap: () -> Void
 
     @State private var scale: CGFloat = 1
@@ -557,7 +382,7 @@ struct DarkroomZoomCanvas: View {
                             .scaledToFit()
                             .frame(width: fitted.width, height: fitted.height)
 
-                        if (holding || compareOriginal), let original = editor.original {
+                        if holding, let original = editor.original {
                             Image(uiImage: original)
                                 .resizable()
                                 .interpolation(.high)
@@ -606,7 +431,7 @@ struct DarkroomZoomCanvas: View {
             .simultaneousGesture(magnifyGesture(container: geometry.size, fitted: fitted))
             .simultaneousGesture(holdGesture, including: editor.original != nil ? .all : .subviews)
             .overlay(alignment: .top) {
-                if holding || compareOriginal {
+                if holding {
                     Text("原图")
                         .font(AppFont.ui(12, .medium))
                         .foregroundStyle(Theme.text)

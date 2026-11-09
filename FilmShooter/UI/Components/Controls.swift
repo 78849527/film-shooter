@@ -30,10 +30,10 @@ struct FilmSlider: View {
     private var isAtDefault: Bool { abs(value - defaultValue) < span * 0.002 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 1 : 4) {
+        VStack(alignment: .leading, spacing: compact ? 2 : 4) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
-                    .font(AppFont.ui(compact ? 11 : 15, .medium))
+                    .font(AppFont.ui(compact ? 12 : 15, .medium))
                     .foregroundStyle(Theme.text)
                 Spacer()
                 Text(format(value))
@@ -50,7 +50,7 @@ struct FilmSlider: View {
                         .fixedSize()
                 }
                 track
-                    .frame(height: compact ? 21 : 26)
+                    .frame(height: compact ? 23 : 26)
                 if let trailingLabel {
                     Text(trailingLabel)
                         .font(AppFont.ui(compact ? 10 : 11))
@@ -87,7 +87,6 @@ struct FilmSlider: View {
             let zero = CGFloat((defaultValue - range.lowerBound) / span)
             let thumbX = fraction * width
             let zeroX = zero * width
-            let knobSize: CGFloat = compact ? 16 : 18
 
             ZStack(alignment: .leading) {
                 Capsule()
@@ -103,10 +102,10 @@ struct FilmSlider: View {
                     .offset(x: zeroX - 0.75)
                 Circle()
                     .fill(Theme.text)
-                    .frame(width: knobSize, height: knobSize)
+                    .frame(width: 18, height: 18)
                     .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
                     .scaleEffect(isDragging ? 1.2 : 1)
-                    .offset(x: thumbX - knobSize / 2)
+                    .offset(x: thumbX - 9)
                 if isDragging {
                     Text(format(value))
                         .font(AppFont.mono(11, .semibold))
