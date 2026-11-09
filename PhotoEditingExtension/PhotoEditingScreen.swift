@@ -1,20 +1,15 @@
 import SwiftUI
 import UIKit
 
-/// Compact Photos extension editor. The two-row dock stays visible while each
-/// tool opens a translucent, independently scrollable control panel.
+/// Photos extension darkroom: one film menu contains the same ordered controls
+/// as the main editor, in a compact translucent panel.
 struct PhotoEditingScreen: View {
     @ObservedObject var model: PhotoEditingModel
     @State private var visibleKind: FilmKind? = nil
-    @State private var activePanel: Panel? = nil
+    @State private var activePanel = false
 
     private let background = Color(red: 0.055, green: 0.052, blue: 0.05)
     private let accent = Color(red: 0.95, green: 0.66, blue: 0.31)
-
-    private enum Panel: String, Identifiable {
-        case film = "胶片", exposure = "曝光", texture = "质感", print = "冲印"
-        var id: String { rawValue }
-    }
 
     private var visibleFilms: [FilmStock] {
         if let visibleKind { return FilmCatalog.films(of: visibleKind) }
@@ -28,11 +23,7 @@ struct PhotoEditingScreen: View {
                     .frame(maxHeight: .infinity)
                     .padding(.horizontal, 8)
                     .padding(.top, 4)
-                    .overlay(alignment: .leading) {
-                        if activePanel == nil {
-                            sideRail.padding(.leading, 8)
-                        }
-                    }
+                    .overlay(alignment: .leading) { sideRail.padding(.leading, 8) }
                 if let error = model.error {
                     Text(error).font(.system(size: 11)).foregroundStyle(.red)
                         .lineLimit(2).padding(.horizontal, 12).padding(.vertical, 4)
@@ -41,11 +32,17 @@ struct PhotoEditingScreen: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .bottom) {
-                if let activePanel {
-                    panel(activePanel)
-                        .frame(maxHeight: min(geometry.size.height * 0.48, 340))
+                if activePanel {
+                    let landscape = geometry.size.width > geometry.size.height
+                    panel
+                        .frame(width: landscape
+                               ? min(400, geometry.size.width * 0.46)
+                               : min(350, geometry.size.width * 0.84),
+                               height: landscape
+                               ? min(geometry.size.height * 0.57, 520)
+                               : min(geometry.size.height / 3, 360))
                         .padding(.horizontal, 8)
-                        .padding(.bottom, 102)
+                        .padding(.bottom, 7)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .zIndex(2)
                 }
@@ -89,28 +86,10 @@ struct PhotoEditingScreen: View {
     private var sideRail: some View {
         VStack(spacing: 5) {
             Button {
-                withAnimation(.easeOut(duration: 0.18)) { activePanel = .film }
+                withAnimation(.easeOut(duration: 0.18)) { activePanel.toggle() }
             } label: {
-                railItem("胶片", symbol: "camera.filters", selected: activePanel == .film)
+                railItem("胶片", symbol: "camera.filters", selected: activePanel)
             }.buttonStyle(.plain)
-            Button {
-                withAnimation(.easeOut(duration: 0.18)) {
-                    activePanel = activePanel == .exposure ? nil : .exposure
-                }
-            } label: { railItem("曝光", symbol: "sun.max", selected: activePanel == .exposure) }
-                .buttonStyle(.plain)
-            Button {
-                withAnimation(.easeOut(duration: 0.18)) {
-                    activePanel = activePanel == .texture ? nil : .texture
-                }
-            } label: { railItem("质感", symbol: "circle.lefthalf.filled", selected: activePanel == .texture) }
-                .buttonStyle(.plain)
-            Button {
-                withAnimation(.easeOut(duration: 0.18)) {
-                    activePanel = activePanel == .print ? nil : .print
-                }
-            } label: { railItem("冲印", symbol: "drop.fill", selected: activePanel == .print) }
-                .buttonStyle(.plain)
         }
         .padding(.vertical, 6)
         .background(.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 14))
@@ -144,24 +123,25 @@ struct PhotoEditingScreen: View {
         .background(.black.opacity(0.5))
     }
 
-    @ViewBuilder
-    private func panel(_ item: Panel) -> some View {
+    private var panel: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(item.rawValue).font(.system(size: 13, weight: .semibold))
+                Text("胶片").font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 6)
+                Text(model.recipe.film.displayName).font(.system(size: 10)).foregroundStyle(.white.opacity(0.58))
                 Spacer()
-                Button { withAnimation(.easeOut(duration: 0.16)) { activePanel = nil } } label: {
+                Button { withAnimation(.easeOut(duration: 0.16)) { activePanel = false } } label: {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 17)).foregroundStyle(.white.opacity(0.65))
                 }.buttonStyle(.plain)
             }.padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 6)
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 9) {
-                    switch item {
-                    case .film: filmControls
-                    case .exposure: exposureControls
-                    case .texture: textureControls
-                    case .print: printControls
-                    }
+                    filmControls
+                    exposureControls
+                    enlargerControls
+                    textureControls
+                    formatControls
+                    printControls
                 }.padding(.horizontal, 12).padding(.bottom, 12)
             }
         }
@@ -200,10 +180,22 @@ struct PhotoEditingScreen: View {
                         ForEach(FilmCatalog.papers(for: model.recipe.film)) { paper in
                             let selected = model.recipe.resolvedPaperID == paper.id
                             Button { model.selectPaper(paper.id) } label: {
-                                Text(paper.name).font(.system(size: 10)).lineLimit(1)
-                                    .padding(.horizontal, 9).frame(height: 27)
-                                    .background(selected ? accent.opacity(0.22) : .white.opacity(0.07), in: Capsule())
-                                    .overlay(Capsule().strokeBorder(selected ? accent : .white.opacity(0.1), lineWidth: 0.8))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(paper.name
+                                        .replacingOccurrences(of: "Kodak ", with: "")
+                                        .replacingOccurrences(of: "Fujifilm ", with: "")
+                                        .replacingOccurrences(of: "Ilford ", with: ""))
+                                        .font(.system(size: 10, weight: .semibold)).lineLimit(1)
+                                    Text(paper.tagline).font(.system(size: 9))
+                                        .foregroundStyle(.white.opacity(0.58)).lineLimit(1)
+                                    if paper.id == model.recipe.film.defaultPaper {
+                                        Text("原配相纸").font(.system(size: 8)).foregroundStyle(accent)
+                                    }
+                                }
+                                .padding(.horizontal, 9).padding(.vertical, 7)
+                                .frame(minWidth: 112, alignment: .leading)
+                                .background(selected ? accent.opacity(0.22) : .white.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+                                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(selected ? accent : .white.opacity(0.1), lineWidth: 0.8))
                             }.buttonStyle(.plain)
                         }
                     }
@@ -229,28 +221,66 @@ struct PhotoEditingScreen: View {
     }
 
     private var exposureControls: some View {
-        VStack(spacing: 7) {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionTitle("曝光")
             slider("曝光补偿", value: Binding(get: { model.recipe.exposureEV }, set: { v in model.change { $0.exposureEV = v } }), range: -3...3)
+            Toggle("自动测光", isOn: Binding(get: { model.recipe.autoExposure }, set: { on in model.change { $0.autoExposure = on } }))
+                .font(.system(size: 11)).tint(accent)
+        }
+    }
+
+    private var enlargerControls: some View {
+        Group {
+            if model.recipe.film.kind.usesPrintPaper {
+                VStack(alignment: .leading, spacing: 5) {
+                    sectionTitle("放大机")
+                    slider("亮度", value: Binding(get: { model.recipe.printBrightness }, set: { v in model.change { $0.printBrightness = v } }), range: -2...2)
+                    slider("冷暖", value: Binding(get: { model.recipe.warmth }, set: { v in model.change { $0.warmth = v } }), range: -1...1)
+                    slider("品绿", value: Binding(get: { model.recipe.tint }, set: { v in model.change { $0.tint = v } }), range: -1...1)
+                }
+            }
         }
     }
 
     private var textureControls: some View {
-        VStack(spacing: 7) {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionTitle("质感")
             slider("颗粒", value: Binding(get: { model.recipe.grain }, set: { v in model.change { $0.grain = v } }), range: 0...2)
             slider("光晕", value: Binding(get: { model.recipe.halation }, set: { v in model.change { $0.halation = v } }), range: 0...3)
-            toggle("胶片边框", value: Binding(get: { model.recipe.filmEdge }, set: { on in model.change { $0.filmEdge = on } }))
+        }
+    }
+
+    private var formatControls: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionTitle("底片")
+            HStack(spacing: 6) {
+                ForEach(FilmFormat.allCases, id: \.self) { format in
+                    Button { model.change { $0.format = format } } label: {
+                        VStack(spacing: 2) {
+                            Text(format.title).font(.system(size: 10, weight: .semibold))
+                            Text(format.subtitle).font(.system(size: 8)).lineLimit(1)
+                        }.frame(maxWidth: .infinity, minHeight: 34)
+                            .foregroundStyle(model.recipe.format == format ? accent : .white.opacity(0.75))
+                            .background(.white.opacity(model.recipe.format == format ? 0.12 : 0.05), in: RoundedRectangle(cornerRadius: 8))
+                    }.buttonStyle(.plain)
+                }
+            }
         }
     }
 
     private var printControls: some View {
-        VStack(spacing: 7) {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionTitle("冲印")
             if model.recipe.film.kind.usesPrintPaper {
-                slider("冲印亮度", value: Binding(get: { model.recipe.printBrightness }, set: { v in model.change { $0.printBrightness = v } }), range: -2...2)
-                slider("暖调", value: Binding(get: { model.recipe.warmth }, set: { v in model.change { $0.warmth = v } }), range: -1...1)
-                slider("色调", value: Binding(get: { model.recipe.tint }, set: { v in model.change { $0.tint = v } }), range: -1...1)
+                toggle("胶片边框", value: Binding(get: { model.recipe.filmEdge }, set: { on in model.change { $0.filmEdge = on } }))
             }
             toggle("日期印", value: Binding(get: { model.recipe.dateStamp }, set: { on in model.change { $0.dateStamp = on } }))
         }
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.74))
+            .padding(.top, 4)
     }
 
     private func toggle(_ title: String, value: Binding<Bool>) -> some View {
