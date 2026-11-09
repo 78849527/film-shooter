@@ -126,13 +126,33 @@ struct EditorFilmSection: View {
 
     var body: some View {
         let editor = self.editor
-        FilmPicker(style: .compact, groupedByKind: true, committedID: editor.recipe.filmID,
-                   onCommit: { id in
-                       editor.selectFilm(id)
-                   }) {
-            EmptyView()
-        } trailing: {
-            EmptyView()
+        VStack(alignment: .leading, spacing: 3) {
+            FilmPicker(style: .compact, groupedByKind: true, committedID: editor.recipe.filmID,
+                       onCommit: { id in
+                           editor.selectFilm(id)
+                       }) {
+                EmptyView()
+            } trailing: {
+                EmptyView()
+            }
+
+            if editor.recipe.film.kind.usesPrintPaper {
+                HStack(spacing: 8) {
+                    Text("相纸")
+                        .font(AppFont.ui(11, .medium))
+                        .foregroundStyle(Theme.secondary)
+                    Spacer(minLength: 4)
+                    Text(editor.recipe.film.kind == .blackWhite ? "黑白相纸" : "彩色相纸")
+                        .font(AppFont.ui(10))
+                        .foregroundStyle(Theme.tertiary)
+                }
+                .padding(.horizontal, 5)
+
+                PaperPicker(film: editor.recipe.film, selection: Binding(
+                    get: { editor.recipe.resolvedPaperID },
+                    set: { editor.recipe.paperID = $0 }))
+                    .id(editor.recipe.filmID)
+            }
         }
     }
 }

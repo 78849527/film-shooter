@@ -264,17 +264,23 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
     private var appliedFilm: FilmStock { FilmCatalog.film(committedID) }
 
     var body: some View {
-        VStack(spacing: 6) {
-            if style == .hero {
-                FilmTitleBlock(film: appliedFilm, style: style)
-                    .padding(.horizontal, 20)
-            } else {
-                HStack(spacing: 12) {
+        VStack(spacing: groupedByKind ? 3 : 6) {
+            if !groupedByKind {
+                if style == .hero {
                     FilmTitleBlock(film: appliedFilm, style: style)
-                    Spacer(minLength: 4)
-                    trailing()
+                        .padding(.horizontal, 20)
+                } else {
+                    HStack(spacing: 12) {
+                        FilmTitleBlock(film: appliedFilm, style: style)
+                        Spacer(minLength: 4)
+                        trailing()
+                    }
+                    .padding(.horizontal, 20)
                 }
-                .padding(.horizontal, 20)
+            }
+
+            if groupedByKind {
+                darkroomKindFilter
             }
 
             FilmCarousel(style: style,
@@ -290,40 +296,22 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
                 .id(groupedByKind ? (visibleKind?.rawValue ?? "all") : "camera")
                 .opacity(dimmed ? 0 : 1)
 
-            HStack(spacing: 10) {
-                leading()
-                Group {
-                    if groupedByKind {
-                        DarkroomKindChips(current: visibleKind, compact: style == .compact) { kind in
-                        guard visibleKind != kind else { return }
-                        visibleKind = kind
-                        if let kind, let first = FilmCatalog.films(of: kind).first {
-                            // Apply the chosen category's first real stock
-                            // immediately; its paper stays user-selected when
-                            // compatible. No stale scroll data is consulted.
-                            jump(to: first.id, haptic: true, commit: true)
-                        } else {
-                            // 全部 only changes which films are visible.
-                            // Do not reset film, paper or the finished preview.
-                            Haptics.selection()
-                            jump(to: committedID, haptic: false, commit: false)
-                        }
-                    }
-                } else {
+            if !groupedByKind {
+                HStack(spacing: 10) {
+                    leading()
                     KindChips(current: appliedFilm.kind, compact: style == .compact) { kind in
                         guard let first = FilmCatalog.films(of: kind).first else { return }
                         if committedID != first.id {
                             jump(to: first.id, haptic: true, commit: true)
                         }
                     }
+                    .frame(maxWidth: .infinity)
+                    if style == .hero {
+                        trailing()
+                    }
                 }
-                }
-                .frame(maxWidth: .infinity)
-                if style == .hero {
-                    trailing()
-                }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
         }
         .compatibleOnChange(of: centeredID) { _, new in centeredChanged(new) }
         .compatibleOnChange(of: committedID) { _, new in
@@ -348,6 +336,33 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
         .onDisappear {
             settleTask?.cancel()
             jumpTask?.cancel()
+        }
+    }
+
+    /// Darkroom filters sit above the film carousel so paper selection can
+    /// follow the stock list immediately beneath it.
+    private var darkroomKindFilter: some View {
+        HStack(spacing: 6) {
+            leading()
+            DarkroomKindChips(current: visibleKind, compact: style == .compact,
+                              onSelect: selectDarkroomKind)
+            .frame(maxWidth: .infinity)
+            trailing()
+        }
+        .padding(.horizontal, 8)
+    }
+
+    private func selectDarkroomKind(_ kind: FilmKind?) {
+        guard visibleKind != kind else { return }
+        visibleKind = kind
+        if let kind, let first = FilmCatalog.films(of: kind).first {
+            // Apply the chosen category's first real stock immediately; its
+            // paper stays user-selected when compatible.
+            jump(to: first.id, haptic: true, commit: true)
+        } else {
+            // 全部 only changes which films are visible; keep the recipe.
+            Haptics.selection()
+            jump(to: committedID, haptic: false, commit: false)
         }
     }
 

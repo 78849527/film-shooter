@@ -208,7 +208,7 @@ struct DarkroomWorkspace: View {
         let panelWidth = landscape
             ? min(400, available.width * 0.46)
             : min(350, available.width * 0.84)
-        let panelHeight = available.height * (landscape ? 0.86 : 0.50)
+        let panelHeight = available.height * (landscape ? 0.86 : 0.50) * (2.0 / 3.0)
 
         return ZStack(alignment: rightHanded ? .bottomTrailing : .bottomLeading) {
             Color.clear
@@ -225,7 +225,8 @@ struct DarkroomWorkspace: View {
                     VStack(alignment: .leading, spacing: 9) {
                         EditorFilmSection(editor: editor)
                             .padding(.horizontal, 3)
-                        RecipeControls(recipe: $editor.recipe, showsExposure: true, compact: true)
+                        RecipeControls(recipe: $editor.recipe, showsExposure: true,
+                                       showsPaper: false, compact: true)
                             .padding(.horizontal, 6)
                     }
                     .padding(.top, 2)
@@ -285,16 +286,18 @@ struct DarkroomWorkspace: View {
 
     private func panelHeader(in available: CGSize, panelWidth: CGFloat,
                              panelHeight: CGFloat) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 7) {
+            panelActions
+
             VStack(alignment: .leading, spacing: 2) {
                 Label("胶片", systemImage: "camera.filters")
-                    .font(AppFont.ui(14, .semibold))
-                Text(panelFloating ? "悬浮模式 · 松开后拖动标题移动" : "长按标题进入悬浮模式")
-                    .font(AppFont.ui(10))
+                    .font(AppFont.ui(12, .semibold))
+                Text(panelFloating ? "悬浮中" : "长按拖动")
+                    .font(AppFont.ui(9))
                     .foregroundStyle(Theme.secondary)
             }
             .foregroundStyle(Theme.text)
-            .frame(minWidth: 138, minHeight: 33, alignment: .leading)
+            .frame(minWidth: 70, minHeight: 33, alignment: .leading)
             .overlay {
                 DarkroomPanelDragHandle(
                     isFloating: panelFloating,
@@ -306,7 +309,13 @@ struct DarkroomWorkspace: View {
                     onEnd: { floatingDragStart = floatingOffset }
                 )
             }
-            Spacer()
+            Spacer(minLength: 2)
+            Text(editor.recipe.film.displayName)
+                .font(AppFont.ui(10, .medium))
+                .foregroundStyle(Theme.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 86, alignment: .trailing)
             Button {
                 withAnimation(.easeOut(duration: 0.18)) { filmPanelOpen = false }
                 resetPanelPosition()
@@ -329,17 +338,15 @@ struct DarkroomWorkspace: View {
     private var panelActions: some View {
         Button(action: onDevelop) {
             Label("冲印", systemImage: "drop.fill")
-                .font(AppFont.ui(13, .semibold))
+                .font(AppFont.ui(11, .semibold))
                 .foregroundStyle(Theme.text)
-                .frame(maxWidth: .infinity, minHeight: 42)
+                .padding(.horizontal, 9)
+                .frame(height: 32)
                 .background(editor.canDevelop ? Theme.accent.opacity(0.36) :
-                            .white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                            .white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         }
         .disabled(!editor.canDevelop || sent)
         .buttonStyle(.pressable)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 8)
-        .background(.black.opacity(0.23))
     }
 
 }

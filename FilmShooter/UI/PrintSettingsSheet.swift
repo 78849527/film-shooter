@@ -7,6 +7,8 @@ struct RecipeControls: View {
     @Binding var recipe: DevelopRecipe
     /// The editor exposes film exposure; the camera uses its own compensation.
     var showsExposure: Bool = false
+    /// The darkroom workspace places paper selection directly under the film list.
+    var showsPaper: Bool = true
     var compact: Bool = false
     /// Forwarded from every slider (true while dragging). The camera's print
     /// sheet uses it to hold the viewfinder re-bake until the drag ends.
@@ -24,7 +26,7 @@ struct RecipeControls: View {
                 }
             }
 
-            if film.kind.usesPrintPaper {
+            if film.kind.usesPrintPaper && showsPaper {
                 ControlSection(title: "相纸", trailing: film.kind == .blackWhite ? "黑白相纸" : "彩色相纸", spacing: compact ? 8 : 14, compact: compact) {
                     PaperPicker(film: film, selection: Binding(
                         get: { recipe.resolvedPaperID },
@@ -42,7 +44,7 @@ struct RecipeControls: View {
                                defaultValue: 0, leadingLabel: "绿", trailingLabel: "品", format: FilmSlider.signed, compact: compact,
                                onEditingChanged: onEditingChanged)
                 }
-            } else {
+            } else if !film.kind.usesPrintPaper && showsPaper {
                 HStack(spacing: 10) {
                     Image(systemName: "sun.max")
                         .foregroundStyle(Theme.secondary)
