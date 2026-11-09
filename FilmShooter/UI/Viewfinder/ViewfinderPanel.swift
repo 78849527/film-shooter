@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import AVFoundation
 
@@ -5,10 +6,10 @@ import AVFoundation
 
 /// The shutter blackout and film-advance haptic. `CameraService.onShutter`
 /// calls `fire()`; only `BlackoutLayer` reads `blackout`.
-@Observable @MainActor
-final class ShutterFX {
-    var blackout: Double = 0
-    @ObservationIgnored private var task: Task<Void, Never>?
+@MainActor
+final class ShutterFX: ObservableObject {
+    @Published var blackout: Double = 0
+    private var task: Task<Void, Never>?
 
     func fire() {
         Haptics.filmAdvance()
@@ -31,7 +32,7 @@ final class ShutterFX {
 /// Fast-changing state (zoom, exposure, blackout, film title) lives in small
 /// subviews.
 struct ViewfinderPanel: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let fx: ShutterFX
 
@@ -67,9 +68,9 @@ struct ViewfinderPanel: View {
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .animation(Motion.pick(Motion.gentle, reduceMotion: reduceMotion), value: model.settings.frameAspect)
-        .onChange(of: model.settings.frameAspect) { _, _ in hideReticle(animated: false) }
-        .onChange(of: model.camera.isSwitching) { _, switching in switchingChanged(switching) }
-        .onChange(of: model.camera.position) { _, _ in positionChanged() }
+        .compatibleOnChange(of: model.settings.frameAspect) { _, _ in hideReticle(animated: false) }
+        .compatibleOnChange(of: model.camera.isSwitching) { _, switching in switchingChanged(switching) }
+        .compatibleOnChange(of: model.camera.position) { _, _ in positionChanged() }
     }
 
     @ViewBuilder
@@ -226,7 +227,7 @@ struct ViewfinderPanel: View {
     }
 
     private var magnifyGesture: some Gesture {
-        MagnifyGesture()
+        MagnificationGesture()
             .onChanged { value in
                 let camera = model.camera
                 if !pinching {
@@ -234,7 +235,7 @@ struct ViewfinderPanel: View {
                     pinchSeen = true
                     camera.beginPinch()
                 }
-                camera.updatePinch(scale: value.magnification)
+                camera.updatePinch(scale: value)
             }
             .onEnded { _ in
                 pinching = false
@@ -300,7 +301,7 @@ struct ViewfinderPanel: View {
 /// The only view that reads the LUT / grain / film kind, so recipe changes
 /// re-evaluate just this (and `ViewfinderView` diffs the values).
 struct ViewfinderLayer: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
 
     var body: some View {
         let camera = model.camera
@@ -314,7 +315,7 @@ struct ViewfinderLayer: View {
 }
 
 struct BlackoutLayer: View {
-    let fx: ShutterFX
+    @ObservedObject var fx: ShutterFX
 
     var body: some View {
         Color.black
@@ -326,7 +327,7 @@ struct BlackoutLayer: View {
 /// A frosted veil while the camera switches sides (only exists while
 /// switching, so there is no permanent backdrop blur over the live picture).
 struct SwitchingOverlay: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
 
     var body: some View {
         let switching = model.camera.isSwitching
@@ -345,7 +346,7 @@ struct SwitchingOverlay: View {
 
 /// Covers the picture while the camera is not delivering frames.
 struct CameraStateOverlay: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
 
     var body: some View {
         let camera = model.camera
@@ -360,7 +361,7 @@ struct CameraStateOverlay: View {
                         Image(systemName: icon(state, interrupted))
                             .font(.system(size: 26, weight: .light))
                             .foregroundStyle(Theme.secondary)
-                            .symbolEffect(.pulse, isActive: state == .idle)
+                            .compatibleSymbolPulse(isActive: state == .idle)
                         Text(message(state, interrupted))
                             .font(AppFont.ui(13))
                             .foregroundStyle(Theme.secondary)
@@ -441,7 +442,7 @@ struct FocusReticle: View {
 /// The sun on a vertical scale beside the reticle; drag up/down on the
 /// viewfinder to move it.
 struct ExposureScale: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     let isAdjusting: Bool
     let dimmed: Bool
 
@@ -492,7 +493,7 @@ struct ExposureScale: View {
 /// pinch or a dial drag a "2.0× · 48 mm" readout floats above. Reads the
 /// ~30 Hz zoom, so it is its own small view.
 struct LensControl: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let isPinching: Bool
 
@@ -517,7 +518,7 @@ struct LensControl: View {
                     .font(AppFont.mono(15, .semibold))
                     .monospacedDigit()
                     .foregroundStyle(Theme.accent)
-                    .contentTransition(.numericText(value: Double(zoom)))
+                    .compatibleNumericText(Double(zoom))
                     .animation(.spring(response: 0.2, dampingFraction: 0.9), value: readout)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
@@ -550,7 +551,7 @@ struct LensControl: View {
         }
         .animation(Motion.pick(Motion.snappy, reduceMotion: reduceMotion), value: showDial)
         .animation(.easeOut(duration: 0.2), value: showReadout)
-        .onChange(of: isPinching) { _, pinching in
+        .compatibleOnChange(of: isPinching) { _, pinching in
             readoutTask?.cancel()
             if pinching {
                 showReadout = true
@@ -570,7 +571,7 @@ struct LensControl: View {
             .font(AppFont.ui(selected ? 13 : 11, .semibold))
             .monospacedDigit()
             .foregroundStyle(selected ? Theme.accent : Theme.text.opacity(0.92))
-            .contentTransition(.numericText(value: Double(selected ? zoom : lens.displayFactor)))
+            .compatibleNumericText(Double(selected ? zoom : lens.displayFactor))
             .animation(.spring(response: 0.2, dampingFraction: 0.9), value: label)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
@@ -674,7 +675,7 @@ struct ZoomDial: View {
                 context.stroke(p, with: .color(Color.white.opacity(0.9)), lineWidth: 1.5)
                 context.draw(Text(labels[i])
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.white.opacity(0.9)),
+                                .foregroundColor(Color.white.opacity(0.9)),
                              at: CGPoint(x: x, y: size.height * 0.3))
             }
             var needle = Path()
@@ -701,7 +702,7 @@ struct ZoomDial: View {
 /// film's table is baking, and the exposure compensation when it isn't zero.
 /// Nothing at all otherwise.
 struct ViewfinderLCD: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
 
     var body: some View {
         let bias = model.camera.exposureBias
@@ -714,11 +715,9 @@ struct ViewfinderLCD: View {
                         Circle()
                             .fill(Theme.lcd)
                             .frame(width: 5, height: 5)
-                            .phaseAnimator([0.25, 1.0]) { content, phase in
-                                content.opacity(phase)
-                            } animation: { _ in
-                                .easeInOut(duration: 0.55)
-                            }
+                            .compatiblePulse([0.25, 1.0], duration: 0.55)
+                        Text("胶片预览更新中")
+                            .lcdText(10)
                     }
                     if showsEV {
                         Text(String(format: "EV %+.1f", bias))
@@ -738,7 +737,7 @@ struct ViewfinderLCD: View {
 
 /// A preview of the date the print will carry (only when 日期印 is on).
 struct DateBackPreview: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
 
     var body: some View {
         let on = model.recipe.dateStamp
@@ -760,7 +759,7 @@ struct DateBackPreview: View {
 /// process -- and fades after ~0.9 s. Only for swipes: the title row above
 /// the carousel already names the film otherwise.
 struct FilmSwitchTitle: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let trigger: Int
     let direction: CGFloat
@@ -807,7 +806,7 @@ struct FilmSwitchTitle: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.bottom, 70)
         .allowsHitTesting(false)
-        .onChange(of: trigger) { _, _ in present() }
+        .compatibleOnChange(of: trigger) { _, _ in present() }
     }
 
     private var transition: AnyTransition {

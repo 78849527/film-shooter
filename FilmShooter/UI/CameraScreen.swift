@@ -27,10 +27,10 @@ struct LibraryRequest: Identifiable {
 /// The root screen: top bar, viewfinder, film chooser, shutter deck. Holds only
 /// presentation state; everything that changes often is read by subviews.
 struct CameraScreen: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Namespace private var namespace
 
-    @State private var fx = ShutterFX()
+    @StateObject private var fx = ShutterFX()
     @State private var galleryRequest: GalleryRequest?
     @State private var settingsRequest: SettingsRequest?
     @State private var libraryRequest: LibraryRequest?
@@ -39,6 +39,8 @@ struct CameraScreen: View {
     @State private var editor: EditorModel?
     @State private var permissionDismissed = false
     @State private var didOpenScene = false
+    @State private var didRouteStartup = false
+    @State private var showStartupImporter = false
 
     /// The hardware shutter (Camera Control / volume buttons) only fires
     /// while the camera screen itself is in front.
@@ -69,42 +71,51 @@ struct CameraScreen: View {
             .padding(.bottom, 2)
         }
         .background(Theme.background.ignoresSafeArea())
+        .photoImporter(isPresented: $showStartupImporter) { imported in
+            editor = imported
+        }
         .overlay { aspectOverlay }
         .overlay { BannerOverlay(topPadding: 52) }
         .overlay { PermissionGate(dismissed: $permissionDismissed) }
-        .onCameraCaptureEvent(isEnabled: captureEventsEnabled) { event in
-            if event.phase == .ended {
-                Task { await model.shoot() }
-            }
-        }
+        .modifier(CompatibleCaptureEventModifier(isEnabled: captureEventsEnabled, shoot: {
+            Task { await model.shoot() }
+        }))
         .sheet(isPresented: $showPrint) {
             PrintSettingsSheet()
-                .environment(model)
+                .environmentObject(model)
         }
         .sheet(item: $libraryRequest) { request in
             FilmLibrarySheet(initialFilter: request.filter)
-                .environment(model)
+                .environmentObject(model)
         }
         .sheet(item: $settingsRequest) { request in
-            SettingsView(startAtAbout: request.startAtAbout)
-                .environment(model)
+            SettingsView(settings: model.settings, startAtAbout: request.startAtAbout)
+                .environmentObject(model)
         }
         .fullScreenCover(item: $galleryRequest) { request in
             GalleryView(initialPhotoID: request.initialPhotoID)
-                .navigationTransition(.zoom(sourceID: "gallery", in: namespace))
-                .environment(model)
+                .compatibleGalleryTransition(namespace: namespace)
+                .environmentObject(model)
         }
         .fullScreenCover(item: $editor) { editor in
             EditorView(editor: editor)
-                .environment(model)
+                .environmentObject(model)
         }
         .onAppear {
             let fx = self.fx
-            model.camera.onShutter = { MainActor.assumeIsolated { fx.fire() } }
+            model.camera.onShutter = { Task { @MainActor in fx.fire() } }
             Haptics.prepareShutter()
         }
-        .onChange(of: editor != nil) { _, open in pauseCameraForEditor(open) }
-        .task { await openScreenshotScene() }
+        .compatibleOnChange(of: editor != nil) { _, open in pauseCameraForEditor(open) }
+        .task {
+            await openScreenshotScene()
+            await openStartupEditorIfNeeded()
+        }
+        .compatibleOnChange(of: showStartupImporter) { wasOpen, isOpen in
+            // If the user cancelled the picker, show the normal live camera.
+            guard wasOpen, !isOpen, editor == nil else { return }
+            model.enterCameraMode()
+        }
     }
 
     // MARK: aspect picker
@@ -142,8 +153,23 @@ struct CameraScreen: View {
                 if editor != nil { model.camera.stop() }
             }
         } else {
-            Task { await model.camera.start() }
+            model.enterCameraMode()
         }
+    }
+
+    // MARK: startup mode
+
+    private func openStartupEditorIfNeeded() async {
+        guard !didRouteStartup else { return }
+        didRouteStartup = true
+        guard !ScreenshotMode.isActive,
+              model.settings.startupDestination == .editor else { return }
+
+        // Let RootView finish its splash and the first presentation settle.
+        try? await Task.sleep(nanoseconds: 850_000_000)
+        guard !Task.isCancelled, editor == nil, settingsRequest == nil,
+              galleryRequest == nil, libraryRequest == nil else { return }
+        showStartupImporter = true
     }
 
     // MARK: screenshot scenes
@@ -206,7 +232,7 @@ struct CameraScreen: View {
 /// Shown above the film chooser when the developing engine could not start
 /// (the camera keeps working). Takes no space otherwise.
 struct EngineStatusCard: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
 
     var body: some View {
         let message: String? = {
@@ -259,7 +285,7 @@ struct EngineStatusCard: View {
 // MARK: - Permission
 
 struct PermissionGate: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Binding var dismissed: Bool
 
     var body: some View {

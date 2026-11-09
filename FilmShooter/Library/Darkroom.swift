@@ -1,5 +1,5 @@
+import Combine
 import Foundation
-import Observation
 import UIKit
 import CoreImage
 
@@ -40,21 +40,48 @@ enum DevelopSource {
 /// and come out as prints in the library (and in Photos). One at a time, on the
 /// engine's queue, and only while the app is in the foreground -- iOS refuses
 /// GPU work in the background.
-@Observable @MainActor
-final class Darkroom {
-    private(set) var jobs: [DevelopJob] = []
+@MainActor
+final class Darkroom: ObservableObject {
+    @Published private(set) var jobs: [DevelopJob] = []
     /// The most recent print, for the gallery button's thumbnail.
-    private(set) var lastDeveloped: DevelopedPhoto?
+    @Published private(set) var lastDeveloped: DevelopedPhoto?
     /// Bumps every time a print is finished (the UI animates on it).
-    private(set) var completedCount = 0
-    private(set) var lastError: String?
+    @Published private(set) var completedCount = 0
+    @Published private(set) var lastError: String?
 
-    @ObservationIgnored private let library: PhotoLibrary
-    @ObservationIgnored private let settings: AppSettings
-    @ObservationIgnored private var sources: [UUID: (DevelopSource, Double?, Int, Date)] = [:]
-    @ObservationIgnored private var worker: Task<Void, Never>?
-    @ObservationIgnored private var isForeground = true
-    @ObservationIgnored private var recentDurations: [Double] = [2.5]
+    private let library: PhotoLibrary
+    private let settings: AppSettings
+    private var sources: [UUID: (DevelopSource, Double?, Int, Date)] = [:]
+    private var worker: Task<Void, Never>?
+    private var isForeground = true
+    private var recentDurations: [Double] = [2.5]
+
+    // Share must wait for the SPECIFIC developed photo, never the gallery's
+    // lastDeveloped (which may belong to an earlier or unrelated job).
+    private var completionWaiters: [UUID: CheckedContinuation<DevelopedPhoto, Error>] = [:]
+    private var completedResults: [UUID: Result<DevelopedPhoto, Error>] = [:]
+
+    func waitForCompletion(of jobID: UUID) async throws -> DevelopedPhoto {
+        if let result = completedResults.removeValue(forKey: jobID) {
+            return try result.get()
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            completionWaiters[jobID] = continuation
+        }
+    }
+
+    private func deliver(_ result: Result<DevelopedPhoto, Error>, for jobID: UUID) {
+        if let waiter = completionWaiters.removeValue(forKey: jobID) {
+            waiter.resume(with: result)
+        } else {
+            completedResults[jobID] = result
+            // Only retain the latest completed jobs for a share request that
+            // registers after completion; no unbounded bookkeeping.
+            while completedResults.count > 24 {
+                if let first = completedResults.keys.first { completedResults.removeValue(forKey: first) }
+            }
+        }
+    }
 
     init(library: PhotoLibrary, settings: AppSettings) {
         self.library = library
@@ -70,8 +97,9 @@ final class Darkroom {
     }
 
     /// Queue a frame. `aspect` (long : short) crops it; `frameNumber` goes on the film edge.
+    @discardableResult
     func enqueue(_ source: DevelopSource, recipe: DevelopRecipe, aspect: Double?, frameNumber: Int,
-                 captureDate: Date = Date()) {
+                 captureDate: Date = Date()) -> UUID {
         let id = UUID()
         var preview: UIImage?
         switch source {
@@ -83,6 +111,7 @@ final class Darkroom {
                                startedAt: nil, expectedSeconds: expected))
         sources[id] = (source, aspect, frameNumber, captureDate)
         pump()
+        return id
     }
 
     func dismissFailed(_ job: DevelopJob) {
@@ -132,6 +161,7 @@ final class Darkroom {
             }
             lastDeveloped = photo
             completedCount += 1
+            deliver(.success(photo), for: id)
             jobs.removeAll { $0.id == id }
             sources.removeValue(forKey: id)
             if settings.autoSaveToPhotos {
@@ -140,6 +170,7 @@ final class Darkroom {
         } catch {
             let message = error.localizedDescription
             lastError = message
+            deliver(.failure(error), for: id)
             ScreenshotMode.log("develop failed \(recipe.filmID): \(message)")
             if let j = jobs.firstIndex(where: { $0.id == id }) {
                 // Sent to the background mid-render: just try again later.

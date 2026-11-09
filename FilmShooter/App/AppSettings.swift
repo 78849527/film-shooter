@@ -1,5 +1,5 @@
+import Combine
 import Foundation
-import Observation
 
 /// The picture's shape in the camera, long : short.
 enum FrameAspect: String, Codable, CaseIterable, Identifiable {
@@ -75,24 +75,59 @@ enum OutputQuality: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// The editing controls follow the user's preferred thumb.
+enum EditorHandedness: String, Codable, CaseIterable, Identifiable {
+    case left, right
+
+    var id: String { rawValue }
+    var title: String { self == .left ? "左手" : "右手" }
+}
+
+/// The initial destination on a fresh app launch.
+enum StartupDestination: String, Codable, CaseIterable, Identifiable {
+    case camera, editor
+
+    var id: String { rawValue }
+    var title: String { self == .camera ? "相机" : "修图" }
+}
+
 /// User preferences, persisted in UserDefaults.
-@Observable @MainActor
-final class AppSettings {
+@MainActor
+final class AppSettings: ObservableObject {
+    // Explicit publisher remains stable with no @Published properties.
+    // Settings must notify SwiftUI after their new values are stored.
+    let objectWillChange = ObservableObjectPublisher()
     private let defaults = UserDefaults.standard
 
-    var outputQuality: OutputQuality { didSet { save(outputQuality.rawValue, "outputQuality") } }
-    var saveFormat: PhotoDecoder.Format { didSet { save(saveFormat.rawValue, "saveFormat") } }
-    var autoSaveToPhotos: Bool { didSet { save(autoSaveToPhotos, "autoSaveToPhotos") } }
-    var keepOriginals: Bool { didSet { save(keepOriginals, "keepOriginals") } }
-    var showGrid: Bool { didSet { save(showGrid, "showGrid") } }
-    var frameAspect: FrameAspect { didSet { save(frameAspect.rawValue, "frameAspect") } }
-    var viewfinderGrain: Bool { didSet { save(viewfinderGrain, "viewfinderGrain") } }
-    var haptics: Bool { didSet { save(haptics, "haptics") } }
-    var rollLength: Int { didSet { save(rollLength, "rollLength") } }
+    var outputQuality: OutputQuality { didSet { save(outputQuality.rawValue, "outputQuality"); objectWillChange.send() } }
+    var saveFormat: PhotoDecoder.Format { didSet { save(saveFormat.rawValue, "saveFormat"); objectWillChange.send() } }
+    var autoSaveToPhotos: Bool { didSet { save(autoSaveToPhotos, "autoSaveToPhotos"); objectWillChange.send() } }
+    var keepOriginals: Bool { didSet { save(keepOriginals, "keepOriginals"); objectWillChange.send() } }
+    var showGrid: Bool { didSet { save(showGrid, "showGrid"); objectWillChange.send() } }
+    var frameAspect: FrameAspect { didSet { save(frameAspect.rawValue, "frameAspect"); objectWillChange.send() } }
+    var editorHandedness: EditorHandedness {
+        didSet { save(editorHandedness.rawValue, "editorHandedness"); objectWillChange.send() }
+    }
+    var startupDestination: StartupDestination {
+        didSet { save(startupDestination.rawValue, "startupDestination"); objectWillChange.send() }
+    }
+    var viewfinderGrain: Bool { didSet { save(viewfinderGrain, "viewfinderGrain"); objectWillChange.send() } }
+    var haptics: Bool {
+        didSet {
+            save(haptics, "haptics")
+            Haptics.isEnabled = haptics
+            if haptics && !oldValue {
+                // A clear confirmation pulse so enabling the switch is testable.
+                Haptics.tap()
+            }
+            objectWillChange.send()
+        }
+    }
+    var rollLength: Int { didSet { save(rollLength, "rollLength"); objectWillChange.send() } }
     /// Favourite films, in the order the user starred them.
-    var favoriteFilmIDs: [String] { didSet { save(favoriteFilmIDs, "favoriteFilmIDs") } }
+    var favoriteFilmIDs: [String] { didSet { save(favoriteFilmIDs, "favoriteFilmIDs"); objectWillChange.send() } }
     /// Most recently used films, most recent first.
-    var recentFilmIDs: [String] { didSet { save(recentFilmIDs, "recentFilmIDs") } }
+    var recentFilmIDs: [String] { didSet { save(recentFilmIDs, "recentFilmIDs"); objectWillChange.send() } }
 
     init() {
         let d = UserDefaults.standard
@@ -102,12 +137,16 @@ final class AppSettings {
         keepOriginals = d.object(forKey: "keepOriginals") as? Bool ?? true
         showGrid = d.object(forKey: "showGrid") as? Bool ?? false
         frameAspect = FrameAspect(rawValue: d.string(forKey: "frameAspect") ?? "") ?? .r3x2
+        editorHandedness = EditorHandedness(rawValue: d.string(forKey: "editorHandedness") ?? "") ?? .right
+        startupDestination = StartupDestination(rawValue: d.string(forKey: "startupDestination") ?? "") ?? .camera
         viewfinderGrain = d.object(forKey: "viewfinderGrain") as? Bool ?? true
         haptics = d.object(forKey: "haptics") as? Bool ?? true
         rollLength = d.object(forKey: "rollLength") as? Int ?? 36
         favoriteFilmIDs = d.stringArray(forKey: "favoriteFilmIDs")
             ?? ["kodak_portra_400", "kodak_gold_200", "fujifilm_pro_400h", "cinestill_800t", "kodak_tri_x_400"]
         recentFilmIDs = d.stringArray(forKey: "recentFilmIDs") ?? []
+        // Do not depend on the root SwiftUI view update order for haptics.
+        Haptics.isEnabled = haptics
     }
 
     private func save(_ value: Any, _ key: String) {

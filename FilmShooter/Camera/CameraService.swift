@@ -1,6 +1,6 @@
 import AVFoundation
 import Foundation
-import Observation
+import Combine
 
 /// One captured frame, as delivered by `AVCapturePhotoOutput`.
 struct CapturedPhoto: @unchecked Sendable {
@@ -29,15 +29,15 @@ enum CameraServiceError: LocalizedError {
 
 /// Runs `body` on the main actor, asynchronously and in FIFO order.
 private func runOnMain(_ body: @escaping @MainActor () -> Void) {
-    DispatchQueue.main.async { MainActor.assumeIsolated(body) }
+    DispatchQueue.main.async { Task { @MainActor in body() } }
 }
 
 /// The camera: session lifecycle, lenses and zoom, focus/exposure, capture.
 ///
 /// All AVFoundation work happens on a private serial queue; this object only
 /// publishes state for the UI and is used from the main actor.
-@Observable @MainActor
-final class CameraService: NSObject {
+@MainActor
+final class CameraService: NSObject, ObservableObject {
     enum State: Equatable {
         case idle, unauthorized, running, failed(String)
     }
@@ -50,31 +50,31 @@ final class CameraService: NSObject {
         let label: String
     }
 
-    private(set) var state: State = .idle
-    private(set) var position: AVCaptureDevice.Position = .back
+    @Published private(set) var state: State = .idle
+    @Published private(set) var position: AVCaptureDevice.Position = .back
     /// Used for the next capture (ignored when `hasFlash` is false).
-    var flashMode: AVCaptureDevice.FlashMode = .off
-    private(set) var hasFlash = false
-    private(set) var lenses: [Lens] = []
+    @Published var flashMode: AVCaptureDevice.FlashMode = .off
+    @Published private(set) var hasFlash = false
+    @Published private(set) var lenses: [Lens] = []
     /// The live display zoom (follows ramps and pinches, ~30 Hz).
-    private(set) var zoomDisplayFactor: CGFloat = 1
+    @Published private(set) var zoomDisplayFactor: CGFloat = 1
     /// Allowed display zoom range for the active camera.
-    private(set) var zoomRange: ClosedRange<CGFloat> = 1...1
+    @Published private(set) var zoomRange: ClosedRange<CGFloat> = 1...1
     /// Allowed exposure bias range for the active camera (within -3...3).
-    private(set) var exposureBiasRange: ClosedRange<Float> = -3...3
-    private(set) var isRAWSupported = false
-    private(set) var isCapturing = false
-    private(set) var isSwitching = false
+    @Published private(set) var exposureBiasRange: ClosedRange<Float> = -3...3
+    @Published private(set) var isRAWSupported = false
+    @Published private(set) var isCapturing = false
+    @Published private(set) var isSwitching = false
     /// The session is interrupted (e.g. another app took the camera).
-    private(set) var isInterrupted = false
+    @Published private(set) var isInterrupted = false
     /// The angle set on the photo connection at capture (90 = portrait).
-    private(set) var captureRotationAngle: CGFloat = 90
+    @Published private(set) var captureRotationAngle: CGFloat = 90
     /// Same as `iconRotationDegrees` but continuous (never jumps by 360),
     /// so `withAnimation` rotates icons the short way.
-    private(set) var uiRotationAngle: Double = 0
+    @Published private(set) var uiRotationAngle: Double = 0
     /// Rotation for icons to stay upright: 0 portrait, 90 / -90 landscape,
     /// 180 upside down. Apply with `.rotationEffect(.degrees(...))`.
-    private(set) var iconRotationDegrees: Double = 0
+    @Published private(set) var iconRotationDegrees: Double = 0
 
     /// Exposure compensation in EV, clamped to `exposureBiasRange`.
     var exposureBias: Float {
@@ -101,24 +101,24 @@ final class CameraService: NSObject {
     let frames = CameraFrameSource()
 
     /// Called on the main thread when the sensor exposes (shutter moment).
-    @ObservationIgnored var onShutter: (() -> Void)?
+    var onShutter: (() -> Void)?
 
-    private var storedExposureBias: Float = 0
-    private var storedCaptureRAW = false
+    @Published private var storedExposureBias: Float = 0
+    @Published private var storedCaptureRAW = false
 
     private let controller = CaptureController()
-    @ObservationIgnored private var baseZoom: CGFloat = 1
-    @ObservationIgnored private var pinchStartFactor: CGFloat = 1
-    @ObservationIgnored private var wantsRunning = false
-    @ObservationIgnored private var lifecycleGeneration = 0
-    @ObservationIgnored private var deviceGeneration = -1
-    @ObservationIgnored private var switchGeneration = 0
-    @ObservationIgnored private var eventsInstalled = false
-    @ObservationIgnored private weak var activeDevice: AVCaptureDevice?
-    @ObservationIgnored private var captureCoordinator: AVCaptureDevice.RotationCoordinator?
-    @ObservationIgnored private var iconCoordinator: AVCaptureDevice.RotationCoordinator?
-    @ObservationIgnored private var captureAngleObservation: NSKeyValueObservation?
-    @ObservationIgnored private var iconAngleObservation: NSKeyValueObservation?
+    private var baseZoom: CGFloat = 1
+    private var pinchStartFactor: CGFloat = 1
+    private var wantsRunning = false
+    private var lifecycleGeneration = 0
+    private var deviceGeneration = -1
+    private var switchGeneration = 0
+    private var eventsInstalled = false
+    private weak var activeDevice: AVCaptureDevice?
+    private var captureCoordinator: AnyObject?
+    private var iconCoordinator: AnyObject?
+    private var captureAngleObservation: NSKeyValueObservation?
+    private var iconAngleObservation: NSKeyValueObservation?
 
     // MARK: Lifecycle
 
@@ -279,7 +279,7 @@ final class CameraService: NSObject {
 
     // MARK: Screenshot mode
 
-    @ObservationIgnored private var simulatedFeed: DispatchSourceTimer?
+    private var simulatedFeed: DispatchSourceTimer?
 
     /// No camera (Simulator / CI screenshots): feed the sample picture as a
     /// 30 fps "camera" and present a typical triple-camera lens set.
@@ -359,6 +359,11 @@ final class CameraService: NSObject {
 
     private func installCaptureCoordinator(for device: AVCaptureDevice) {
         captureAngleObservation?.invalidate()
+        guard #available(iOS 17.0, *) else {
+            captureCoordinator = nil
+            setCaptureAngle(90)
+            return
+        }
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
         captureCoordinator = coordinator
         setCaptureAngle(coordinator.videoRotationAngleForHorizonLevelCapture)
@@ -371,6 +376,11 @@ final class CameraService: NSObject {
     /// active, so their direction never depends on the front sensor mounting.
     private func installIconCoordinator(for device: AVCaptureDevice) {
         iconAngleObservation?.invalidate()
+        guard #available(iOS 17.0, *) else {
+            iconCoordinator = nil
+            setIconAngle(from: 90)
+            return
+        }
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
         iconCoordinator = coordinator
         setIconAngle(from: coordinator.videoRotationAngleForHorizonLevelCapture)
@@ -394,6 +404,7 @@ final class CameraService: NSObject {
         if abs(delta) > 0.01 { uiRotationAngle += delta }
     }
 
+    @available(iOS 17.0, *)
     nonisolated private static func observeCaptureAngle(
         of coordinator: AVCaptureDevice.RotationCoordinator,
         handler: @escaping @Sendable (CGFloat) -> Void
@@ -623,9 +634,14 @@ private final class CaptureController: @unchecked Sendable {
                 return
             }
             let settings = makeSettings(for: request)
-            if let connection = photoOutput.connection(with: .video),
-               connection.isVideoRotationAngleSupported(request.rotationAngle) {
-                connection.videoRotationAngle = request.rotationAngle
+            if let connection = photoOutput.connection(with: .video) {
+                if #available(iOS 17.0, *) {
+                    if connection.isVideoRotationAngleSupported(request.rotationAngle) {
+                        connection.videoRotationAngle = request.rotationAngle
+                    }
+                } else if connection.isVideoOrientationSupported {
+                    connection.videoOrientation = .portrait
+                }
             }
             let id = settings.uniqueID
             let processor = PhotoCaptureProcessor(request: request, onShutter: onShutter) { [weak self] result in
@@ -687,7 +703,11 @@ private final class CaptureController: @unchecked Sendable {
     private func configureConnections(position: AVCaptureDevice.Position) {
         let mirrored = position == .front
         if let connection = videoOutput.connection(with: .video) {
-            if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
+            if #available(iOS 17.0, *) {
+                if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
+            } else if connection.isVideoOrientationSupported {
+                connection.videoOrientation = .portrait
+            }
             if connection.isVideoMirroringSupported {
                 connection.automaticallyAdjustsVideoMirroring = false
                 connection.isVideoMirrored = mirrored
@@ -724,14 +744,16 @@ private final class CaptureController: @unchecked Sendable {
         if photoOutput.isAppleProRAWSupported, photoOutput.isAppleProRAWEnabled != wantsRAW {
             photoOutput.isAppleProRAWEnabled = wantsRAW
         }
-        if photoOutput.isZeroShutterLagSupported, !photoOutput.isZeroShutterLagEnabled {
-            photoOutput.isZeroShutterLagEnabled = true
-        }
-        if photoOutput.isResponsiveCaptureSupported, !photoOutput.isResponsiveCaptureEnabled {
-            photoOutput.isResponsiveCaptureEnabled = true
-        }
-        if photoOutput.isFastCapturePrioritizationSupported, !photoOutput.isFastCapturePrioritizationEnabled {
-            photoOutput.isFastCapturePrioritizationEnabled = true
+        if #available(iOS 17.0, *) {
+            if photoOutput.isZeroShutterLagSupported, !photoOutput.isZeroShutterLagEnabled {
+                photoOutput.isZeroShutterLagEnabled = true
+            }
+            if photoOutput.isResponsiveCaptureSupported, !photoOutput.isResponsiveCaptureEnabled {
+                photoOutput.isResponsiveCaptureEnabled = true
+            }
+            if photoOutput.isFastCapturePrioritizationSupported, !photoOutput.isFastCapturePrioritizationEnabled {
+                photoOutput.isFastCapturePrioritizationEnabled = true
+            }
         }
         if photoOutput.isContentAwareDistortionCorrectionSupported, !photoOutput.isContentAwareDistortionCorrectionEnabled {
             photoOutput.isContentAwareDistortionCorrectionEnabled = true

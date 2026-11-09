@@ -3,23 +3,7 @@ import Foundation
 import Metal
 import QuartzCore
 
-/// Process-wide Metal objects, shared by the viewfinder and the engine bridge.
-enum MetalContext {
-    static let device: any MTLDevice = {
-        guard let device = MTLCreateSystemDefaultDevice() else {
-            fatalError("Metal is not available on this device")
-        }
-        return device
-    }()
-
-    static let queue: any MTLCommandQueue = {
-        guard let queue = device.makeCommandQueue() else {
-            fatalError("Cannot create a Metal command queue")
-        }
-        queue.label = "FilmShooter"
-        return queue
-    }()
-}
+// MetalContext is shared with the Photo Editing extension in Engine/MetalContext.swift.
 
 /// Must match `VFUniforms` in Viewfinder.metal (64 bytes).
 private struct ViewfinderUniforms {

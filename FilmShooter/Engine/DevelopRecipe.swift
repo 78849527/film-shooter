@@ -71,12 +71,13 @@ struct DevelopRecipe: Codable, Hashable {
     }
 
     mutating func selectFilm(_ id: String) {
-        filmID = id
-        let film = FilmCatalog.film(id)
-        if film.kind.usesPrintPaper {
-            let valid = FilmCatalog.papers(for: film).map(\.id)
-            if !valid.contains(paperID) { paperID = film.defaultPaper }
-        }
+        guard id != filmID else { return }
+        // Changing film must not erase a manually chosen print paper.
+        // resolvedPaperID already uses this paper if it is compatible with
+        // the new stock, or a valid default for incompatible/slide stocks.
+        // In particular, visiting a slide stock must not overwrite the
+        // previous colour-paper selection.
+        filmID = FilmCatalog.film(id).id
     }
 
     /// Per-stock grain scaling for the measured B&W profiles (their sheets give a

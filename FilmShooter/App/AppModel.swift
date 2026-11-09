@@ -1,12 +1,12 @@
 import Foundation
-import Observation
+import Combine
 import SwiftUI
 import UIKit
 
 /// The app's state: the film loaded in the camera, the engine, the viewfinder
 /// table, the development queue and the contact sheet.
-@Observable @MainActor
-final class AppModel {
+@MainActor
+final class AppModel: ObservableObject {
     enum EngineState: Equatable {
         case starting
         case ready
@@ -17,17 +17,21 @@ final class AppModel {
     let library: PhotoLibrary
     let camera: CameraService
     let darkroom: Darkroom
-    @ObservationIgnored let luts = LUTStore()
+    let luts = LUTStore()
 
-    private(set) var engineState: EngineState = .starting
+    @Published private(set) var engineState: EngineState = .starting
 
     /// What the camera develops with. Exposure here stays 0 in camera mode:
     /// exposure compensation is the camera's own (`camera.exposureBias`), so the
     /// viewfinder and the print agree.
+    // iOS 16 renders the old value when @Published announces from willSet
+    // during a projected SwiftUI binding write. Publish after committing the
+    // complete film + paper recipe to prevent one-selection lag.
     var recipe: DevelopRecipe {
         didSet {
             guard recipe != oldValue else { return }
             if recipe.filmID != filmID { filmID = recipe.filmID }
+            objectWillChange.send()
             schedulePersist()
             if !isAdjustingPrint { refreshLUT() }
         }
@@ -35,26 +39,31 @@ final class AppModel {
 
     /// The loaded film's id, tracked on its own so views that only care about
     /// the film don't re-render on every print-slider tick.
-    private(set) var filmID: String
+    @Published private(set) var filmID: String
 
     /// True while a print slider is being dragged: the viewfinder table is
     /// re-baked once on release instead of mid-drag.
-    var isAdjustingPrint = false {
+    @Published var isAdjustingPrint = false {
         didSet { if oldValue && !isAdjustingPrint { refreshLUT() } }
     }
 
     /// The viewfinder's current colour table (nil until the first bake).
-    private(set) var lut: FilmLUT?
-    private(set) var isBakingLUT = false
+    @Published private(set) var lut: FilmLUT?
+    @Published private(set) var isBakingLUT = false
 
     /// The next frame number on the roll (1...rollLength).
-    private(set) var frameNumber: Int
+    @Published private(set) var frameNumber: Int
     /// A transient message for the HUD ("新胶卷已装好", errors ...).
-    var banner: String?
+    @Published var banner: String?
 
-    @ObservationIgnored private var bannerTask: Task<Void, Never>?
-    @ObservationIgnored private var lutTask: Task<Void, Never>?
-    @ObservationIgnored private var persistTask: Task<Void, Never>?
+    private var bannerTask: Task<Void, Never>?
+    private var lutTask: Task<Void, Never>?
+    private var persistTask: Task<Void, Never>?
+    private var childSubscriptions = Set<AnyCancellable>()
+    private var photoEditingCount = 0
+    /// Startup editor does not activate the camera until the user actually
+    /// leaves the photo picker/editor and returns to camera mode.
+    private var cameraSessionEnabled = true
 
     var film: FilmStock { FilmCatalog.film(filmID) }
     var paper: PrintPaper? { film.kind.usesPrintPaper ? FilmCatalog.paper(recipe.resolvedPaperID) : nil }
@@ -77,6 +86,7 @@ final class AppModel {
         self.library = library
         self.camera = CameraService()
         self.darkroom = Darkroom(library: library, settings: settings)
+        cameraSessionEnabled = settings.startupDestination == .camera
         var initial = DevelopRecipe()
         if let data = UserDefaults.standard.data(forKey: "recipe"),
            let r = try? JSONDecoder().decode(DevelopRecipe.self, from: data) {
@@ -86,8 +96,18 @@ final class AppModel {
         filmID = initial.filmID
         frameNumber = max(1, UserDefaults.standard.integer(forKey: "frameNumber"))
         lut = luts.cached(for: recipe)
-        let darkroom = self.darkroom
-        luts.shouldPause = { darkroom.isBusy }
+        luts.shouldPause = { [weak self] in
+            guard let self else { return false }
+            return self.darkroom.isBusy || self.photoEditingCount > 0
+        }
+        // iOS 16's environment object observes AppModel. Forward nested model updates.
+        for publisher in [settings.objectWillChange.eraseToAnyPublisher(),
+                          library.objectWillChange.eraseToAnyPublisher(),
+                          camera.objectWillChange.eraseToAnyPublisher(),
+                          darkroom.objectWillChange.eraseToAnyPublisher()] {
+            publisher.sink { [weak self] _ in self?.objectWillChange.send() }
+                .store(in: &childSubscriptions)
+        }
     }
 
     // MARK: lifecycle
@@ -113,12 +133,33 @@ final class AppModel {
     func setActive(_ active: Bool) {
         darkroom.setForeground(active)
         if active {
-            Task { await camera.start() }
+            if cameraSessionEnabled {
+                Task { await camera.start() }
+            }
         } else {
             camera.stop()
             luts.cancelPrebake()
             persistRecipe()
         }
+    }
+
+    /// Called after dismissing the startup photo picker or exiting darkroom.
+    /// Once enabled, normal camera foreground/background behavior resumes.
+    func enterCameraMode() {
+        cameraSessionEnabled = true
+        Task { await camera.start() }
+    }
+
+    // MARK: darkroom engine priority
+
+    func beginPhotoEditing() {
+        photoEditingCount += 1
+        // Stop scheduling LUT bakes that would queue in front of the edit.
+        luts.cancelPrebake()
+    }
+
+    func endPhotoEditing() {
+        photoEditingCount = max(0, photoEditingCount - 1)
     }
 
     // MARK: film
@@ -208,6 +249,11 @@ final class AppModel {
     /// Bring the viewfinder table in line with the recipe: instantly from the
     /// cache, otherwise bake (only the latest request matters).
     private func refreshLUT() {
+        // Cancel previous selection work before looking up a cached table:
+        // cached film/paper pairs must not wait on a stale background bake.
+        lutTask?.cancel()
+        lutTask = nil
+        luts.cancelPrebake()
         if let cached = luts.cached(for: recipe) {
             lut = cached
             isBakingLUT = false
@@ -215,12 +261,11 @@ final class AppModel {
             return
         }
         guard engineState == .ready else { return }
-        lutTask?.cancel()
         let wanted = recipe
         isBakingLUT = true
         lutTask = Task { [weak self] in
-            // Let a fast scroll through the carousel settle before baking.
-            try? await Task.sleep(nanoseconds: 90_000_000)
+            // The carousel already commits intentionally; the extra 90ms
+            // debounce delayed film switching without improving correctness.
             guard let self, !Task.isCancelled else { return }
             do {
                 let t0 = Date()

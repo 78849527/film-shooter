@@ -2,6 +2,15 @@ import SwiftUI
 
 // MARK: - Carousel
 
+/// The horizontal positions of carousel cards in iOS 16's scroll view.
+private struct LegacyFilmCenterPreference: PreferenceKey {
+    static var defaultValue: [String: CGFloat] { [:] }
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+
 /// A snapping, horizontally scrolling row of film canisters. The centred roll
 /// is full size; the others shrink and fade with their distance from the
 /// centre (pure transforms: no layout, no offscreen passes, so it holds
@@ -17,13 +26,28 @@ struct FilmCarousel: View {
     }
 
     let style: Style
+    /// Editor: only show the film stocks belonging to the applied category.
+    /// Camera: pass the full catalog to preserve existing capture UI.
+    let films: [FilmStock]
     @Binding var centeredID: String?
     let onTap: (String) -> Void
-    /// The scroll came to rest.
-    let onSettle: () -> Void
+    /// The scroll came to rest. Pass the exact selected film ID rather than
+    /// waiting for SwiftUI's @State centeredID to be applied next frame.
+    let onSettle: (String) -> Void
+    /// In the darkroom, calculate a swipe from its gesture translation,
+    /// independently of delayed iOS 16 ScrollView geometry Preferences.
+    var deterministicSwipe: Bool = false
+    /// Prevent stale iOS 16 geometry from overwriting a category selection
+    /// while ScrollViewReader moves to the requested film.
+    var programmaticTarget: String?
+    var programmaticUntil: Date = .distantPast
+    var onUserDrag: () -> Void = {}
+    @State private var legacyDragging = false
+    @State private var gestureOriginID: String?
 
     var body: some View {
         GeometryReader { geo in
+            if #available(iOS 18.0, *) {
             let viewport = geo.size.width
             let cardWidth = FilmCanister.width(forHeight: style.cardHeight)
             let step = cardWidth + style.gap
@@ -31,7 +55,7 @@ struct FilmCarousel: View {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: style.gap) {
-                        ForEach(FilmCatalog.films) { film in
+                        ForEach(films) { film in
                             card(film, width: cardWidth)
                                 .id(film.id)
                                 .visualEffect { content, proxy in
@@ -62,7 +86,7 @@ struct FilmCarousel: View {
                 .scrollTargetBehavior(.viewAligned(limitBehavior: .never))
                 .scrollPosition(id: $centeredID, anchor: .center)
                 .onScrollPhaseChange { _, phase in
-                    if phase == .idle { onSettle() }
+                    if phase == .idle, let id = centeredID { onSettle(id) }
                 }
                 .onAppear {
                     if let id = centeredID { proxy.scrollTo(id, anchor: .center) }
@@ -74,6 +98,9 @@ struct FilmCarousel: View {
                     if let id = centeredID { proxy.scrollTo(id, anchor: .center) }
                 }
             }
+            } else {
+                legacyCarousel(viewport: geo.size.width)
+            }
         }
         .frame(height: style.height)
         .overlay(alignment: .bottom) {
@@ -81,6 +108,95 @@ struct FilmCarousel: View {
                 .fill(Theme.accent)
                 .frame(width: 14, height: 2)
                 .allowsHitTesting(false)
+        }
+    }
+
+
+    /// iOS 16 fallback: use geometry preferences and ScrollViewReader instead
+    /// of iOS 17/18 scroll-position APIs. It still centers the chosen roll.
+    private func legacyCarousel(viewport: CGFloat) -> some View {
+        let width = FilmCanister.width(forHeight: style.cardHeight)
+        return ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: style.gap) {
+                    ForEach(films) { film in
+                        card(film, width: width)
+                            .id(film.id)
+                            .background {
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: LegacyFilmCenterPreference.self,
+                                        value: [film.id: geo.frame(in: .named("LegacyFilmCarousel")).midX])
+                                }
+                            }
+                    }
+                }
+                .padding(.horizontal, max(0, (viewport - width) / 2))
+            }
+            .coordinateSpace(name: "LegacyFilmCarousel")
+            .onPreferenceChange(LegacyFilmCenterPreference.self) { positions in
+                // Only the user's drag may choose a film from geometry.
+                // Programmatic scrollTo reports old/intermediate coordinates
+                // on iOS 16 and must never overwrite the actual selection.
+                guard legacyDragging, !deterministicSwipe else { return }
+                guard let closest = positions.min(by: {
+                    abs($0.value - viewport / 2) < abs($1.value - viewport / 2)
+                })?.key else { return }
+                if centeredID != closest { centeredID = closest }
+            }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { _ in
+                        if !legacyDragging {
+                            gestureOriginID = centeredID
+                            onUserDrag()
+                        }
+                        legacyDragging = true
+                    }
+                    .onEnded { drag in
+                        let selected: String?
+                        if deterministicSwipe,
+                           let origin = gestureOriginID ?? centeredID,
+                           let index = films.firstIndex(where: { $0.id == origin }) {
+                            // SwiftUI's preference value is often from the
+                            // previous layout pass on iOS 16. Use the actual
+                            // finished gesture, snapped to a roll step.
+                            let travel = drag.translation.width
+                            let threshold = width * 0.20
+                            let steps = abs(travel) < threshold ? 0
+                                : max(1, Int((abs(travel) / (width + style.gap)).rounded()))
+                            let direction = travel < 0 ? 1 : -1
+                            let next = min(max(index + direction * steps, 0), films.count - 1)
+                            selected = films[next].id
+                        } else {
+                            selected = centeredID
+                        }
+                        legacyDragging = false
+                        gestureOriginID = nil
+                        guard let id = selected else { return }
+                        centeredID = id
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                        // Crucially: do not read centeredID back through a
+                        // separate @State owner; deliver this gesture's ID.
+                        onSettle(id)
+                    }
+            )
+            .onAppear {
+                if let id = centeredID { proxy.scrollTo(id, anchor: .center) }
+            }
+            .compatibleOnChange(of: programmaticTarget) { _, target in
+                if target != nil {
+                    legacyDragging = false
+                }
+            }
+            .compatibleOnChange(of: centeredID) { _, selected in
+                guard !legacyDragging, let selected else { return }
+                withAnimation(Motion.standard) {
+                    proxy.scrollTo(selected, anchor: .center)
+                }
+            }
         }
     }
 
@@ -106,6 +222,8 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let style: FilmCarousel.Style
+    /// Limit the list to the committed film's kind in the photo editor only.
+    let groupedByKind: Bool
     let committedID: String
     let onCommit: (String) -> Void
     var onTapCentered: (() -> Void)?
@@ -122,12 +240,17 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
     /// The last id this picker committed itself (its echo through
     /// `committedID` must not scroll the carousel).
     @State private var ownCommit: String?
+    /// Darkroom-only filter. nil = 全部; a kind shows only its own films.
+    /// This is independent of the applied film, so browsing the full catalog
+    /// does not switch back to a single category.
+    @State private var visibleKind: FilmKind? = nil
 
-    init(style: FilmCarousel.Style, committedID: String, onCommit: @escaping (String) -> Void,
-         onTapCentered: (() -> Void)? = nil,
+    init(style: FilmCarousel.Style, groupedByKind: Bool = false, committedID: String,
+         onCommit: @escaping (String) -> Void, onTapCentered: (() -> Void)? = nil,
          @ViewBuilder leading: @escaping () -> Leading,
          @ViewBuilder trailing: @escaping () -> Trailing) {
         self.style = style
+        self.groupedByKind = groupedByKind
         self.committedID = committedID
         self.onCommit = onCommit
         self.onTapCentered = onTapCentered
@@ -136,41 +259,68 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
         _centeredID = State(initialValue: committedID)
     }
 
-    private var centeredFilm: FilmStock { FilmCatalog.film(centeredID ?? committedID) }
+    /// The applied recipe is the single authority for labels and category.
+    /// centeredID is a scroll candidate, never the developed film.
+    private var appliedFilm: FilmStock { FilmCatalog.film(committedID) }
 
     var body: some View {
-        VStack(spacing: 6) {
-            if style == .hero {
-                FilmTitleBlock(film: centeredFilm, style: style)
+        VStack(spacing: groupedByKind ? 3 : 6) {
+            if !groupedByKind {
+                if style == .hero {
+                    FilmTitleBlock(film: appliedFilm, style: style)
+                        .padding(.horizontal, 20)
+                } else {
+                    HStack(spacing: 12) {
+                        FilmTitleBlock(film: appliedFilm, style: style)
+                        Spacer(minLength: 4)
+                        trailing()
+                    }
                     .padding(.horizontal, 20)
-            } else {
-                HStack(spacing: 12) {
-                    FilmTitleBlock(film: centeredFilm, style: style)
-                    Spacer(minLength: 4)
-                    trailing()
                 }
-                .padding(.horizontal, 20)
             }
 
-            FilmCarousel(style: style, centeredID: $centeredID, onTap: tapCard, onSettle: settled)
+            if groupedByKind {
+                darkroomKindFilter
+            }
+
+            FilmCarousel(style: style,
+                         films: groupedByKind && visibleKind != nil
+                             ? FilmCatalog.films(of: visibleKind!)
+                             : FilmCatalog.films,
+                         centeredID: $centeredID, onTap: tapCard,
+                         onSettle: { selected in settled(selected) },
+                         deterministicSwipe: groupedByKind, programmaticTarget: jumpTarget,
+                         programmaticUntil: jumpUntil, onUserDrag: cancelProgrammaticJump)
+                // Switching filters rebuilds the iOS 16 ScrollView, keeping
+                // the new category free of prior geometry and inertia.
+                .id(groupedByKind ? (visibleKind?.rawValue ?? "all") : "camera")
                 .opacity(dimmed ? 0 : 1)
 
-            HStack(spacing: 10) {
-                leading()
-                KindChips(current: centeredFilm.kind, compact: style == .compact) { kind in
-                    if let first = FilmCatalog.films(of: kind).first, first.kind != centeredFilm.kind {
-                        jump(to: first.id, haptic: true, commit: true)
+            if !groupedByKind {
+                HStack(spacing: 10) {
+                    leading()
+                    KindChips(current: appliedFilm.kind, compact: style == .compact) { kind in
+                        guard let first = FilmCatalog.films(of: kind).first else { return }
+                        if committedID != first.id {
+                            jump(to: first.id, haptic: true, commit: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    if style == .hero {
+                        trailing()
                     }
                 }
-                .frame(maxWidth: .infinity)
-                if style == .hero {
-                    trailing()
-                }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
         }
-        .onChange(of: centeredID) { _, new in centeredChanged(new) }
-        .onChange(of: committedID) { _, new in
+        .compatibleOnChange(of: centeredID) { _, new in centeredChanged(new) }
+        .compatibleOnChange(of: committedID) { _, new in
+            // If another view selected an off-filter film, reveal its kind.
+            // The 全部 filter intentionally remains 全部.
+            if groupedByKind, let kind = visibleKind,
+               FilmCatalog.film(new).kind != kind {
+                visibleKind = FilmCatalog.film(new).kind
+            }
             if new == ownCommit {
                 ownCommit = nil
                 return
@@ -179,10 +329,9 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
             jump(to: new, haptic: false, commit: false)
         }
         .task {
-            // Ignore the scroll view's own settling on first layout.
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            // Don't apply an initial-film value captured 350ms before a
+            // category press. The first carousel onAppear handles alignment.
             armed = true
-            if centeredID != committedID { jump(to: committedID, haptic: false, commit: false) }
         }
         .onDisappear {
             settleTask?.cancel()
@@ -190,80 +339,101 @@ struct FilmPicker<Leading: View, Trailing: View>: View {
         }
     }
 
+    /// Darkroom filters sit above the film carousel so paper selection can
+    /// follow the stock list immediately beneath it.
+    private var darkroomKindFilter: some View {
+        HStack(spacing: 6) {
+            leading()
+            DarkroomKindChips(current: visibleKind, compact: style == .compact,
+                              onSelect: selectDarkroomKind)
+            .frame(maxWidth: .infinity)
+            trailing()
+        }
+        .padding(.horizontal, 8)
+    }
+
+    private func selectDarkroomKind(_ kind: FilmKind?) {
+        guard visibleKind != kind else { return }
+        visibleKind = kind
+        if let kind, let first = FilmCatalog.films(of: kind).first {
+            // Apply the chosen category's first real stock immediately; its
+            // paper stays user-selected when compatible.
+            jump(to: first.id, haptic: true, commit: true)
+        } else {
+            // 全部 only changes which films are visible; keep the recipe.
+            Haptics.selection()
+            jump(to: committedID, haptic: false, commit: false)
+        }
+    }
+
     private func tapCard(_ id: String) {
-        if id == centeredID {
+        if id == committedID {
             onTapCentered?()
         } else {
+            // Centered-but-not-applied is still a selectable film.
             jump(to: id, haptic: true, commit: true)
         }
     }
 
-    /// Scroll to a film. Long jumps (more than four rolls) don't whip through
-    /// the row: the carousel dips out, moves, and fades back in.
+    /// Scroll and apply one film + paper selection in the same event.
     private func jump(to id: String, haptic: Bool, commit: Bool) {
+        settleTask?.cancel()
+        jumpTask?.cancel()
         jumpTarget = id
-        jumpUntil = Date().addingTimeInterval(0.7)
+        jumpUntil = Date().addingTimeInterval(0.85)
         if haptic { Haptics.selection() }
+
         let films = FilmCatalog.films
         let from = films.firstIndex { $0.id == centeredID } ?? 0
         let to = films.firstIndex { $0.id == id } ?? 0
-        jumpTask?.cancel()
-        if abs(to - from) > 4 {
-            jumpTask = Task {
-                withAnimation(.easeOut(duration: 0.12)) { dimmed = true }
-                try? await Task.sleep(nanoseconds: 120_000_000)
-                guard !Task.isCancelled else {
-                    dimmed = false
-                    return
-                }
-                var still = Transaction()
-                still.disablesAnimations = true
-                withTransaction(still) { centeredID = id }
-                try? await Task.sleep(nanoseconds: 30_000_000)
-                withAnimation(.easeIn(duration: 0.18)) { dimmed = false }
-            }
+        let crossingKind = FilmCatalog.film(id).kind != appliedFilm.kind
+        if crossingKind || abs(to - from) > 4 {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { centeredID = id }
         } else {
-            withAnimation(Motion.pick(Motion.standard, reduceMotion: reduceMotion)) { centeredID = id }
+            withAnimation(Motion.pick(Motion.standard, reduceMotion: reduceMotion)) {
+                centeredID = id
+            }
         }
-        if commit { scheduleCommit(id) }
+
+        if commit, id != committedID {
+            ownCommit = id
+            onCommit(id)
+        }
+    }
+
+    private func cancelProgrammaticJump() {
+        jumpTask?.cancel()
+        jumpTarget = nil
+        jumpUntil = .distantPast
+        settleTask?.cancel()
     }
 
     /// A detent passed under the notch: tick like a dial (no commit yet).
     private func centeredChanged(_ new: String?) {
         guard armed, let new else { return }
         if Date() < jumpUntil {
-            // A programmatic scroll passing other cards: only its target counts.
-            if new == jumpTarget { scheduleCommit(new) }
+            // The selected ID was committed at the moment of button tap.
+            // Do not re-commit intermediate carousel geometry.
             return
         }
         Haptics.selection()
     }
 
-    /// The scroll came to rest: commit whatever is under the notch.
-    private func settled() {
-        guard armed, Date() >= jumpUntil else { return }
+    /// A user release commits the reel currently under the notch in the same
+    /// event. Programmatic movements remain excluded by jumpUntil.
+    private func settled(_ id: String) {
+        guard armed, Date() >= jumpUntil, id != committedID else { return }
+        // A filtered list cannot select a stock from another category.
+        // 全部 intentionally permits swipes across all four kinds.
+        if groupedByKind, let kind = visibleKind,
+           FilmCatalog.film(id).kind != kind { return }
         settleTask?.cancel()
-        let commit = onCommit
-        let current = committedID
-        settleTask = Task {
-            try? await Task.sleep(nanoseconds: 60_000_000)
-            guard !Task.isCancelled, let id = centeredID, id != current else { return }
-            ownCommit = id
-            commit(id)
-        }
+        ownCommit = id
+        onCommit(id)
     }
 
-    private func scheduleCommit(_ id: String) {
-        settleTask?.cancel()
-        let commit = onCommit
-        let current = committedID
-        settleTask = Task {
-            try? await Task.sleep(nanoseconds: 80_000_000)
-            guard !Task.isCancelled, id != current else { return }
-            ownCommit = id
-            commit(id)
-        }
-    }
 }
 
 // MARK: - Title
@@ -344,12 +514,59 @@ struct KindChips: View {
     }
 }
 
+
+/// The darkroom filter includes a fifth, "全部", mode. Its selection is
+/// independent of the film kind: users can browse all stocks without
+/// changing the selected film or manually chosen print paper.
+private struct DarkroomKindChips: View {
+    let current: FilmKind?
+    var compact: Bool = false
+    let onSelect: (FilmKind?) -> Void
+
+    @Namespace private var namespace
+
+    var body: some View {
+        HStack(spacing: compact ? 2 : 4) {
+            chip(title: "全部", value: nil)
+            ForEach(FilmKind.allCases) { kind in
+                chip(title: kind.chipTitle, value: kind)
+            }
+        }
+        .animation(Motion.snappy, value: current)
+    }
+
+    private func chip(title: String, value: FilmKind?) -> some View {
+        let selected = current == value
+        return Button {
+            onSelect(value)
+        } label: {
+            Text(title)
+                .font(AppFont.ui(compact ? 12 : 13, .semibold))
+                .foregroundStyle(selected ? Theme.text : Theme.secondary)
+                .padding(.horizontal, compact ? 6 : 10)
+                .frame(height: 30)
+                .background {
+                    if selected {
+                        Capsule()
+                            .fill(Theme.surfaceHigher)
+                            .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.45), lineWidth: 1))
+                            .matchedGeometryEffect(id: "darkroomKind", in: namespace)
+                    }
+                }
+                .frame(minHeight: 34)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressable(scale: 0.94))
+        .accessibilityLabel(Text(value?.title ?? "全部胶片"))
+    }
+}
+
 // MARK: - Camera film section
 
 /// The camera screen's film chooser, bound to `model.filmID` (which changes
 /// only with the film, not with print-slider ticks).
 struct CameraFilmSection: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     let openPrint: () -> Void
     let openLibrary: () -> Void
 

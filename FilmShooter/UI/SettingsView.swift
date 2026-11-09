@@ -7,7 +7,8 @@ enum SettingsRoute: Hashable {
 }
 
 struct SettingsView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject private var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
 
     /// The navigation path. Initialised with About when asked to open there,
@@ -15,12 +16,12 @@ struct SettingsView: View {
     @State private var path: [SettingsRoute]
     @State private var confirmRewind = false
 
-    init(startAtAbout: Bool = false) {
+    init(settings: AppSettings, startAtAbout: Bool = false) {
+        _settings = ObservedObject(wrappedValue: settings)
         _path = State(initialValue: startAtAbout ? [.about] : [])
     }
 
     var body: some View {
-        @Bindable var settings = model.settings
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(spacing: 22) {
@@ -59,6 +60,47 @@ struct SettingsView: View {
                                       systemImage: "circle.dotted", isOn: $settings.viewfinderGrain)
                     }
 
+                    ControlSection(title: "启动方式", spacing: 14) {
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("启动进入")
+                                    .font(AppFont.ui(15, .medium))
+                                    .foregroundStyle(Theme.text)
+                                Text("修图模式会自动打开系统照片选择器")
+                                    .font(AppFont.ui(12))
+                                    .foregroundStyle(Theme.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            PillSegmented(options: StartupDestination.allCases,
+                                          selection: $settings.startupDestination,
+                                          title: { $0.title })
+                                .frame(width: 138)
+                        }
+                        Text("下次启动 App 时生效；取消选择照片可返回相机")
+                            .font(AppFont.ui(12))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+
+                    ControlSection(title: "暗房布局", spacing: 14) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("操作习惯")
+                                    .font(AppFont.ui(15, .medium))
+                                    .foregroundStyle(Theme.text)
+                                Text("侧边胶卷与相纸入口靠惯用手，胶片名称在对侧")
+                                    .font(AppFont.ui(12))
+                                    .foregroundStyle(Theme.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            PillSegmented(options: EditorHandedness.allCases,
+                                          selection: $settings.editorHandedness, title: { $0.title })
+                                .frame(width: 134)
+                        }
+                        Text("暗房内可点击画面隐藏控件；横图支持旋转屏幕查看")
+                            .font(AppFont.ui(12))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+
                     ControlSection(title: "胶卷", spacing: 14) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -68,7 +110,7 @@ struct SettingsView: View {
                                 Text("当前拍到第 \(String(model.frameNumber)) 张")
                                     .font(AppFont.ui(12))
                                     .foregroundStyle(Theme.secondary)
-                                    .contentTransition(.numericText(value: Double(model.frameNumber)))
+                                    .compatibleNumericText(Double(model.frameNumber))
                             }
                             Spacer()
                             PillSegmented(options: [24, 36], selection: $settings.rollLength,
@@ -159,7 +201,7 @@ struct SettingsView: View {
         .onAppear {
             ScreenshotMode.log("settings appeared, path \(path.count)")
         }
-        .onChange(of: path) { old, new in
+        .compatibleOnChange(of: path) { old, new in
             ScreenshotMode.log("settings path \(old.count) -> \(new.count)")
         }
         .tint(Theme.accent)

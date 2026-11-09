@@ -5,7 +5,7 @@ import SwiftUI
 /// as a square crop. Opens from the gallery button with a zoom transition;
 /// each print opens the same way into the detail pager.
 struct GalleryView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     @Namespace private var namespace
@@ -38,7 +38,7 @@ struct GalleryView: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: UUID.self) { id in
                 PhotoDetailView(startID: id, currentID: $currentID)
-                    .navigationTransition(.zoom(sourceID: currentID ?? id, in: namespace))
+                    .compatibleDetailTransition(id: currentID ?? id, namespace: namespace)
             }
         }
         .overlay { BannerOverlay(topPadding: 8) }
@@ -61,12 +61,12 @@ struct GalleryView: View {
         }
         .fullScreenCover(item: $editor) { editor in
             EditorView(editor: editor)
-                .environment(model)
+                .environmentObject(model)
         }
         .onAppear {
             ScreenshotMode.log("gallery appeared, path \(path.count), \(model.library.photos.count) photos")
         }
-        .onChange(of: path) { old, new in
+        .compatibleOnChange(of: path) { old, new in
             ScreenshotMode.log("gallery path \(old.count) -> \(new.count)")
         }
     }
@@ -93,7 +93,7 @@ struct GalleryView: View {
                 Text(count == 0 ? "还没有照片" : "共 \(count) 张")
                     .font(AppFont.ui(12))
                     .foregroundStyle(Theme.secondary)
-                    .contentTransition(.numericText(value: Double(count)))
+                    .compatibleNumericText(Double(count))
             }
             Spacer()
             Button {
@@ -163,15 +163,11 @@ struct GalleryView: View {
             Circle()
                 .fill(Theme.lcd)
                 .frame(width: 6, height: 6)
-                .phaseAnimator([0.3, 1.0]) { content, phase in
-                    content.opacity(phase)
-                } animation: { _ in
-                    .easeInOut(duration: 0.8)
-                }
+                .compatiblePulse([0.3, 1.0], duration: 0.8)
             Text("暗房 · 正在冲洗 \(model.darkroom.pendingCount) 张")
                 .font(AppFont.ui(13, .medium))
                 .foregroundStyle(Theme.secondary)
-                .contentTransition(.numericText(value: Double(model.darkroom.pendingCount)))
+                .compatibleNumericText(Double(model.darkroom.pendingCount))
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -186,7 +182,7 @@ struct GalleryView: View {
             ContactCell(photo: photo)
         }
         .buttonStyle(.pressable(scale: 0.97))
-        .matchedTransitionSource(id: photo.id, in: namespace)
+        .compatibleMatchedTransitionSource(id: photo.id, in: namespace)
         .contextMenu {
             ShareLink(item: model.library.fileURL(for: photo)) {
                 Label("分享", systemImage: "square.and.arrow.up")
@@ -239,7 +235,7 @@ struct ContactCell: View {
 /// turning into the print, traced by a progress line; retry / remove when it
 /// failed.
 struct JobCell: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     let job: DevelopJob
 
     var body: some View {
@@ -399,7 +395,7 @@ struct FilmStripArt: View {
                 context.stroke(frame, with: .color(Theme.accent.opacity(0.18)), lineWidth: 0.6)
             }
             context.draw(Text("FILMSHOOTER  135").font(.system(size: 6, weight: .bold, design: .monospaced))
-                            .foregroundStyle(Theme.accent.opacity(0.55)),
+                            .foregroundColor(Theme.accent.opacity(0.55)),
                          at: CGPoint(x: size.width * 0.28, y: rail / 2 + 0.5))
         }
     }

@@ -13,7 +13,7 @@ enum PhotoDecoder {
     /// Decode file bytes. RAW (DNG) goes through `CIRAWFilter` with Apple's
     /// tone rendering switched off, so the film sees the sensor's response.
     static func ciImage(from data: Data, isRAW: Bool) throws -> CIImage {
-        if isRAW, let raw = CIRAWFilter(imageData: data, identifierHint: UTType.dng.identifier) {
+        if isRAW, let raw = CIRAWFilter(imageData: data, identifierHint: UTType(filenameExtension: "dng")?.identifier) {
             raw.boostAmount = 0
             raw.boostShadowAmount = 0
             raw.isGamutMappingEnabled = false
