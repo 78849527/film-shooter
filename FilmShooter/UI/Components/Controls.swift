@@ -283,6 +283,7 @@ struct ControlSection<Content: View>: View {
     var trailing: String? = nil
     var spacing: CGFloat = 16
     var compact: Bool = false
+    var frosted: Bool = false
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -303,7 +304,23 @@ struct ControlSection<Content: View>: View {
                 content()
             }
             .padding(compact ? 9 : 14)
-            .surfaceCard(radius: compact ? 12 : 18)
+            .background {
+                if frosted {
+                    RoundedRectangle(cornerRadius: compact ? 12 : 18, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: compact ? 12 : 18, style: .continuous)
+                                .fill(Theme.surface.opacity(0.18))
+                        }
+                } else {
+                    RoundedRectangle(cornerRadius: compact ? 12 : 18, style: .continuous)
+                        .fill(Theme.surface)
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: compact ? 12 : 18, style: .continuous)
+                    .strokeBorder(Theme.hairline, lineWidth: 1)
+            }
         }
     }
 }

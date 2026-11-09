@@ -226,14 +226,13 @@ struct DarkroomWorkspace: View {
                         EditorFilmSection(editor: editor)
                             .padding(.horizontal, 3)
                         RecipeControls(recipe: $editor.recipe, showsExposure: true,
-                                       showsPaper: false, compact: true)
+                                       showsPaper: false, frostedSections: true, compact: true)
                             .padding(.horizontal, 6)
                     }
                     .padding(.top, 2)
                 }
                 .scrollIndicators(.hidden)
 
-                panelActions
             }
             .frame(width: panelWidth, height: panelHeight)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17))

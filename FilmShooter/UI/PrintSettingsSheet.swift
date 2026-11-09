@@ -9,6 +9,8 @@ struct RecipeControls: View {
     var showsExposure: Bool = false
     /// The darkroom workspace places paper selection directly under the film list.
     var showsPaper: Bool = true
+    /// Use the editor's shared translucent surface for every adjustment group.
+    var frostedSections: Bool = false
     var compact: Bool = false
     /// Forwarded from every slider (true while dragging). The camera's print
     /// sheet uses it to hold the viewfinder re-bake until the drag ends.
@@ -18,7 +20,8 @@ struct RecipeControls: View {
         let film = recipe.film
         VStack(alignment: .leading, spacing: compact ? 8 : 16) {
             if showsExposure {
-                ControlSection(title: "曝光", spacing: compact ? 8 : 14, compact: compact) {
+                ControlSection(title: "曝光", spacing: compact ? 8 : 14,
+                               compact: compact, frosted: frostedSections) {
                     FilmSlider(title: "曝光补偿", value: $recipe.exposureEV, range: -3...3,
                                defaultValue: 0, format: FilmSlider.ev, compact: compact, onEditingChanged: onEditingChanged)
                     SettingToggle(title: "自动测光", subtitle: compact ? nil : "让引擎为这张照片测光，再叠加上面的补偿",
@@ -26,14 +29,19 @@ struct RecipeControls: View {
                 }
             }
 
-            if film.kind.usesPrintPaper && showsPaper {
-                ControlSection(title: "相纸", trailing: film.kind == .blackWhite ? "黑白相纸" : "彩色相纸", spacing: compact ? 8 : 14, compact: compact) {
-                    PaperPicker(film: film, selection: Binding(
-                        get: { recipe.resolvedPaperID },
-                        set: { recipe.paperID = $0 }))
-                        .id(film.id)
+            if film.kind.usesPrintPaper {
+                if showsPaper {
+                    ControlSection(title: "相纸", trailing: film.kind == .blackWhite ? "黑白相纸" : "彩色相纸",
+                                   spacing: compact ? 8 : 14, compact: compact,
+                                   frosted: frostedSections) {
+                        PaperPicker(film: film, selection: Binding(
+                            get: { recipe.resolvedPaperID },
+                            set: { recipe.paperID = $0 }))
+                            .id(film.id)
+                    }
                 }
-                ControlSection(title: "放大机", spacing: compact ? 8 : 14, compact: compact) {
+                ControlSection(title: "放大机", spacing: compact ? 8 : 14,
+                               compact: compact, frosted: frostedSections) {
                     FilmSlider(title: "亮度", value: $recipe.printBrightness, range: -2...2,
                                defaultValue: 0, leadingLabel: "暗", trailingLabel: "亮", format: FilmSlider.ev, compact: compact,
                                onEditingChanged: onEditingChanged)
@@ -55,7 +63,8 @@ struct RecipeControls: View {
                 .padding(.horizontal, 4)
             }
 
-            ControlSection(title: "质感", spacing: compact ? 8 : 14, compact: compact) {
+            ControlSection(title: "质感", spacing: compact ? 8 : 14,
+                           compact: compact, frosted: frostedSections) {
                 FilmSlider(title: "颗粒", value: $recipe.grain, range: 0...2,
                            defaultValue: 1, leadingLabel: "细腻", trailingLabel: "粗犷", format: FilmSlider.times, compact: compact,
                            onEditingChanged: onEditingChanged)
@@ -73,7 +82,8 @@ struct RecipeControls: View {
                 }
             }
 
-            ControlSection(title: "冲印", spacing: compact ? 8 : 14, compact: compact) {
+            ControlSection(title: "冲印", spacing: compact ? 8 : 14,
+                           compact: compact, frosted: frostedSections) {
                 SettingToggle(title: "胶片边框", subtitle: compact ? nil : "连同片基、齿孔和边缘字一起印出来",
                               systemImage: "film", isOn: $recipe.filmEdge)
                 RowDivider(inset: 34)
