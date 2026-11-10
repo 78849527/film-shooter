@@ -11,6 +11,8 @@ struct DevelopedPhoto: Identifiable, Codable, Hashable {
     var recipe: DevelopRecipe
     /// Non-destructive post-development grade settings.
     var postGrade: PostGradeRecipe? = nil
+    /// Full independent grade-panel recipe, stored separately from the print recipe.
+    var gradeRecipeData: Data? = nil
     /// Original developed print kept so later grade edits never compound.
     var gradeBaseName: String? = nil
     var width: Int
@@ -164,6 +166,46 @@ final class PhotoLibrary: ObservableObject {
         }.value
         updated.fileName = outputName
         updated.postGrade = recipe
+        updated.assetLocalID = nil
+        update(updated)
+        if photo.fileName != outputName { try? FileManager.default.removeItem(at: fileURL(for: photo)) }
+    }
+
+    /// Apply the standalone Oltra-derived grade recipe to the developed print.
+    /// Repeated edits always start from the retained ungraded print.
+    func applyGrade(_ recipe: GradeRecipe, to photo: DevelopedPhoto) async throws {
+        let sourceURL: URL
+        var updated = photo
+        if let baseName = photo.gradeBaseName {
+            sourceURL = url(baseName)
+        } else {
+            let suffix = photo.fileName.split(separator: ".").last.map(String.init) ?? "jpg"
+            let baseName = "\(photo.id.uuidString)-grade-base.\(suffix)"
+            let baseURL = url(baseName)
+            if !FileManager.default.fileExists(atPath: baseURL.path) {
+                try FileManager.default.copyItem(at: fileURL(for: photo), to: baseURL)
+            }
+            updated.gradeBaseName = baseName
+            sourceURL = baseURL
+        }
+
+        let outputName = "\(photo.id.uuidString)-postgrade.jpg"
+        let outputURL = url(outputName)
+        let thumbURL = url(photo.thumbName)
+        let rendered = try await Task.detached(priority: .userInitiated) {
+            try GradeImageCodec.render(inputURL: sourceURL, recipe: recipe)
+        }.value
+        guard let cgImage = rendered.cgImage,
+              let data = rendered.jpegData(compressionQuality: 0.96) else {
+            throw EngineError.decode("调色图像编码失败")
+        }
+        try data.write(to: outputURL, options: .atomic)
+        try await Task.detached(priority: .userInitiated) {
+            try PhotoDecoder.writeThumbnail(cgImage, to: thumbURL)
+        }.value
+        updated.fileName = outputName
+        updated.postGrade = nil
+        updated.gradeRecipeData = try JSONEncoder().encode(recipe)
         updated.assetLocalID = nil
         update(updated)
         if photo.fileName != outputName { try? FileManager.default.removeItem(at: fileURL(for: photo)) }

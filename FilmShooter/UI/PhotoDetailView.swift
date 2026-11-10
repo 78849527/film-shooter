@@ -1,6 +1,18 @@
 import SwiftUI
 import UIKit
 
+private struct GradeLaunch: Identifiable {
+    let id = UUID()
+    let photo: DevelopedPhoto
+    let source: GradeInputSource
+}
+
+private struct PregradePayload {
+    let gradedData: Data
+    let originalData: Data
+    let originalExtension: String
+}
+
 /// One print at a time, paging horizontally. Pinch / double-tap to zoom,
 /// press and hold to see the original, swipe down (the zoom transition's own
 /// gesture) or the chevron to go back.
@@ -16,7 +28,8 @@ struct PhotoDetailView: View {
     @State private var chromeHidden = false
     @State private var confirmDelete = false
     @State private var editor: EditorModel?
-    @State private var gradingPhoto: DevelopedPhoto?
+    @State private var gradeLaunch: GradeLaunch?
+    @State private var pendingPregrade: PregradePayload?
     @State private var isSaving = false
 
     init(startID: UUID, currentID: Binding<UUID?>) {
@@ -68,8 +81,12 @@ struct PhotoDetailView: View {
             EditorView(editor: editor)
                 .environmentObject(model)
         }
-        .fullScreenCover(item: $gradingPhoto) { photo in
-            PostGradeView(photo: photo, library: model.library)
+        .fullScreenCover(item: $gradeLaunch, onDismiss: openPendingPregrade) { launch in
+            IndependentGradeView(photo: launch.photo, source: launch.source, library: model.library) {
+                gradedData, originalData, originalExtension in
+                pendingPregrade = PregradePayload(gradedData: gradedData, originalData: originalData,
+                                                  originalExtension: originalExtension)
+            }
         }
     }
 
@@ -192,8 +209,11 @@ struct PhotoDetailView: View {
                 }
                 .disabled(photo.originalName == nil)
                 .opacity(photo.originalName == nil ? 0.35 : 1)
-                Button {
-                    gradingPhoto = photo
+                Menu {
+                    if photo.originalName != nil {
+                        Button("冲印前原图调色") { gradeLaunch = GradeLaunch(photo: photo, source: .original) }
+                    }
+                    Button("冲印后成片调色") { gradeLaunch = GradeLaunch(photo: photo, source: .print) }
                 } label: {
                     actionLabel("slider.horizontal.3", "调色")
                 }
@@ -269,6 +289,17 @@ struct PhotoDetailView: View {
             scrolledID = next
             model.library.delete(photo)
         }
+    }
+
+    private func openPendingPregrade() {
+        guard let pending = pendingPregrade else { return }
+        pendingPregrade = nil
+        editor = EditorModel(
+            source: .pregraded(data: pending.gradedData, originalData: pending.originalData,
+                               originalExtension: pending.originalExtension,
+                               captureDate: current?.captureDate),
+            recipe: model.recipe, outputLongEdge: model.settings.outputQuality.longEdge
+        )
     }
 }
 

@@ -22,6 +22,15 @@ without them is not licensed to be shipped.
       are unmodified; the LUTs are derivatives, and this says how they were
       made.
 
+  SpektraFilm-Oltra-GPL-3.0.txt
+      SpektraFilm Oltra's iOS grading core adapted into FilmShooter's separate
+      post-image grade panel. The grade core is GPL-3.0-or-later.
+      https://github.com/78849527/spektraFilmOltra/tree/ios16.5.1
+
+  Oltra-SpektraFilm-Profiles-CC-BY-SA-4.0.txt
+      Attribution notice preserved from the source branch. This migration does
+      not copy its CC BY-SA profile or LUT assets into FilmShooter.
+
   metal-cpp-Apache-2.0.txt
       metal-cpp, Apple's C++ bindings for Metal, Apache-2.0, compiled into
       the binary.

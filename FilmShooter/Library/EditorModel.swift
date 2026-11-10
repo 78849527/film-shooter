@@ -9,6 +9,9 @@ import UIKit
 final class EditorModel: ObservableObject, Identifiable {
     enum Source {
         case imported(data: Data, isRAW: Bool)
+        /// A graded image sent back through FilmShooter's normal print pipeline,
+        /// while retaining the untouched camera/import original for later reprints.
+        case pregraded(data: Data, originalData: Data, originalExtension: String, captureDate: Date?)
         case existing(DevelopedPhoto)
     }
 
@@ -87,6 +90,7 @@ final class EditorModel: ObservableObject, Identifiable {
         var r = recipe
         // Imported photos have not been metered by our camera.
         if case .imported = source { r.autoExposure = true; r.exposureEV = 0 }
+        if case .pregraded = source { r.autoExposure = true; r.exposureEV = 0 }
         self.recipe = r
         self.quality = outputLongEdge
     }
@@ -104,6 +108,9 @@ final class EditorModel: ObservableObject, Identifiable {
             case .imported(let d, let raw):
                 data = d; isRAW = raw
                 captureDate = PhotoDecoder.captureDate(of: d)
+            case .pregraded(let d, _, _, let date):
+                data = d; isRAW = false
+                captureDate = date ?? PhotoDecoder.captureDate(of: d)
             case .existing(let p):
                 guard let u = library.originalURL(for: p) else { throw EngineError.decode("原图未保留，无法重新冲洗") }
                 data = try Data(contentsOf: u, options: .mappedIfSafe)
@@ -207,6 +214,11 @@ final class EditorModel: ObservableObject, Identifiable {
         case .imported(let data, let isRAW):
             return darkroom.enqueue(.imported(data: data, isRAW: isRAW), recipe: r, aspect: nil,
                                     frameNumber: frameNumber, captureDate: captureDate ?? Date())
+        case .pregraded(let data, let originalData, let originalExtension, let date):
+            return darkroom.enqueue(.pregraded(data: data, originalData: originalData,
+                                               originalExtension: originalExtension), recipe: r,
+                                    aspect: nil, frameNumber: frameNumber,
+                                    captureDate: date ?? captureDate ?? Date())
         case .existing(let p):
             return darkroom.enqueue(.redevelop(p), recipe: r, aspect: p.cropAspect,
                                     frameNumber: p.frameNumber, captureDate: p.captureDate)

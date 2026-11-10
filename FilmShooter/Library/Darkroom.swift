@@ -32,6 +32,8 @@ enum DevelopSource {
     case capture(CapturedPhoto)
     /// A photo file the user imported (bytes as in the library).
     case imported(data: Data, isRAW: Bool)
+    /// A grade-panel output fed back into printing, retaining the untouched source.
+    case pregraded(data: Data, originalData: Data, originalExtension: String)
     /// Re-develop a frame already in the contact sheet from its kept original.
     case redevelop(DevelopedPhoto)
 }
@@ -105,6 +107,7 @@ final class Darkroom: ObservableObject {
         switch source {
         case .capture(let c): preview = PhotoDecoder.quickPreview(of: c.processedData)
         case .imported(let data, _): preview = PhotoDecoder.quickPreview(of: data)
+        case .pregraded(let data, _, _): preview = PhotoDecoder.quickPreview(of: data)
         case .redevelop(let p): preview = library.thumbnail(for: p)
         }
         jobs.append(DevelopJob(id: id, recipe: recipe, preview: preview, phase: .queued,
@@ -194,6 +197,7 @@ final class Darkroom: ObservableObject {
         var developIsRAW = false
         var originalData: Data?
         var originalExt = "heic"
+        var originalIsRAW = false
         var existing: DevelopedPhoto?
         var metadataSource: Data
 
@@ -204,10 +208,12 @@ final class Darkroom: ObservableObject {
                 developIsRAW = true
                 originalData = raw
                 originalExt = "dng"
+                originalIsRAW = true
             } else {
                 developData = c.processedData
                 originalData = c.processedData
-                originalExt = PhotoDecoder.isRAW(data: c.processedData) ? "dng" : "heic"
+                originalIsRAW = PhotoDecoder.isRAW(data: c.processedData)
+                originalExt = originalIsRAW ? "dng" : "heic"
             }
             metadataSource = c.processedData
         case .imported(let data, let isRAW):
@@ -215,11 +221,20 @@ final class Darkroom: ObservableObject {
             developIsRAW = isRAW
             originalData = data
             originalExt = isRAW ? "dng" : "heic"
+            originalIsRAW = isRAW
             metadataSource = data
+        case .pregraded(let data, let sourceData, let sourceExtension):
+            developData = data
+            developIsRAW = false
+            originalData = sourceData
+            originalExt = sourceExtension
+            originalIsRAW = PhotoDecoder.isRAW(data: sourceData)
+            metadataSource = sourceData
         case .redevelop(let p):
             guard let u = library.originalURL(for: p) else { throw EngineError.decode("原图未保留") }
             developData = try Data(contentsOf: u, options: .mappedIfSafe)
             developIsRAW = p.originalIsRAW
+            originalIsRAW = p.originalIsRAW
             metadataSource = developData
             existing = p
         }
@@ -265,7 +280,7 @@ final class Darkroom: ObservableObject {
         return DevelopedPhoto(id: id, createdAt: existing?.createdAt ?? Date(), captureDate: captureDate,
                               recipe: recipe, width: width, height: height, fileName: fileName,
                               thumbName: thumbName, originalName: originalName,
-                              originalIsRAW: existing?.originalIsRAW ?? isRAW,
+                              originalIsRAW: existing?.originalIsRAW ?? originalIsRAW,
                               assetLocalID: nil, frameNumber: existing?.frameNumber ?? frameNumber,
                               cropAspect: aspect)
     }
