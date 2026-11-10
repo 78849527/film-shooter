@@ -8,7 +8,7 @@ name: iOS IPA
 
 on:
   push:
-    branches: [main, 'fix/ios16-5-1-compat']
+    branches: [main, 'fix/ios16-5-1-compat', 'feature/ios16-post-develop-grading']
     paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 

@@ -9,6 +9,10 @@ struct DevelopedPhoto: Identifiable, Codable, Hashable {
     var createdAt: Date
     var captureDate: Date
     var recipe: DevelopRecipe
+    /// Non-destructive post-development grade settings.
+    var postGrade: PostGradeRecipe? = nil
+    /// Original developed print kept so later grade edits never compound.
+    var gradeBaseName: String? = nil
     var width: Int
     var height: Int
     var fileName: String
@@ -74,6 +78,10 @@ final class PhotoLibrary: ObservableObject {
     }
 
     func update(_ photo: DevelopedPhoto) {
+        if let previous = photos.first(where: { $0.id == photo.id }),
+           let oldBase = previous.gradeBaseName, oldBase != photo.gradeBaseName {
+            try? FileManager.default.removeItem(at: url(oldBase))
+        }
         writeSidecar(photo)
         if let i = photos.firstIndex(where: { $0.id == photo.id }) { photos[i] = photo }
         thumbs.removeObject(forKey: photo.id as NSUUID)
@@ -81,7 +89,8 @@ final class PhotoLibrary: ObservableObject {
 
     func delete(_ photo: DevelopedPhoto) {
         let fm = FileManager.default
-        for name in [photo.fileName, photo.thumbName, photo.originalName, "\(photo.id.uuidString).json"].compactMap({ $0 }) {
+        for name in [photo.fileName, photo.thumbName, photo.originalName, photo.gradeBaseName,
+                     "\(photo.id.uuidString).json"].compactMap({ $0 }) {
             try? fm.removeItem(at: url(name))
         }
         thumbs.removeObject(forKey: photo.id as NSUUID)
@@ -119,6 +128,45 @@ final class PhotoLibrary: ObservableObject {
         return await Task.detached(priority: .userInitiated) {
             PhotoDecoder.displayImage(at: u, maxPixel: maxPixel)
         }.value
+    }
+
+    /// Apply ordinary post-development color grading to the developed print.
+    /// Later edits use the same saved base print instead of compounding JPEGs.
+    func applyPostGrade(_ recipe: PostGradeRecipe, to photo: DevelopedPhoto) async throws {
+        let sourceURL: URL
+        var updated = photo
+        if let baseName = photo.gradeBaseName {
+            sourceURL = url(baseName)
+        } else {
+            let suffix = photo.fileName.split(separator: ".").last.map(String.init) ?? "jpg"
+            let baseName = "\(photo.id.uuidString)-grade-base.\(suffix)"
+            let baseURL = url(baseName)
+            if !FileManager.default.fileExists(atPath: baseURL.path) {
+                try FileManager.default.copyItem(at: fileURL(for: photo), to: baseURL)
+            }
+            updated.gradeBaseName = baseName
+            sourceURL = baseURL
+        }
+
+        let outputName = "\(photo.id.uuidString)-postgrade.jpg"
+        let outputURL = url(outputName)
+        let thumbURL = url(photo.thumbName)
+        let rendered = try await Task.detached(priority: .userInitiated) {
+            try PostGradeRenderer.render(inputURL: sourceURL, recipe: recipe)
+        }.value
+        guard let cgImage = rendered.cgImage,
+              let data = rendered.jpegData(compressionQuality: 0.96) else {
+            throw EngineError.decode("调色图像编码失败")
+        }
+        try data.write(to: outputURL, options: .atomic)
+        try await Task.detached(priority: .userInitiated) {
+            try PhotoDecoder.writeThumbnail(cgImage, to: thumbURL)
+        }.value
+        updated.fileName = outputName
+        updated.postGrade = recipe
+        updated.assetLocalID = nil
+        update(updated)
+        if photo.fileName != outputName { try? FileManager.default.removeItem(at: fileURL(for: photo)) }
     }
 
     /// The original as shot, for before/after.

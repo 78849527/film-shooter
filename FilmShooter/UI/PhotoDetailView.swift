@@ -16,6 +16,7 @@ struct PhotoDetailView: View {
     @State private var chromeHidden = false
     @State private var confirmDelete = false
     @State private var editor: EditorModel?
+    @State private var gradingPhoto: DevelopedPhoto?
     @State private var isSaving = false
 
     init(startID: UUID, currentID: Binding<UUID?>) {
@@ -66,6 +67,9 @@ struct PhotoDetailView: View {
         .fullScreenCover(item: $editor) { editor in
             EditorView(editor: editor)
                 .environmentObject(model)
+        }
+        .fullScreenCover(item: $gradingPhoto) { photo in
+            PostGradeView(photo: photo, library: model.library)
         }
     }
 
@@ -188,6 +192,11 @@ struct PhotoDetailView: View {
                 }
                 .disabled(photo.originalName == nil)
                 .opacity(photo.originalName == nil ? 0.35 : 1)
+                Button {
+                    gradingPhoto = photo
+                } label: {
+                    actionLabel("slider.horizontal.3", "调色")
+                }
                 Button {
                     confirmDelete = true
                 } label: {
