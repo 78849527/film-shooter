@@ -54,7 +54,6 @@ enum PostGradeRenderer {
             filter.inputImage = image
             filter.cubeDimension = 33
             filter.cubeData = cubeData
-            filter.colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
             image = filter.outputImage ?? image
         }
 

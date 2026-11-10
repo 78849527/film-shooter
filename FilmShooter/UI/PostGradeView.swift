@@ -174,10 +174,11 @@ struct PostGradeView: View {
     private func refreshPreview() async {
         let token = previewToken
         let rendered: UIImage?
+        let selectedRecipe = recipe
         guard let baseName = photo.gradeBaseName else {
             let url = library.fileURL(for: photo)
             rendered = try? await Task.detached(priority: .userInitiated) {
-                try PostGradeRenderer.render(inputURL: url, recipe: recipe, maxLongEdge: 1400)
+                try PostGradeRenderer.render(inputURL: url, recipe: selectedRecipe, maxLongEdge: 1400)
             }.value
             guard token == previewToken else { return }
             preview = rendered
@@ -185,7 +186,7 @@ struct PostGradeView: View {
         }
         let url = library.url(baseName)
         rendered = try? await Task.detached(priority: .userInitiated) {
-            try PostGradeRenderer.render(inputURL: url, recipe: recipe, maxLongEdge: 1400)
+            try PostGradeRenderer.render(inputURL: url, recipe: selectedRecipe, maxLongEdge: 1400)
         }.value
         guard token == previewToken else { return }
         preview = rendered
